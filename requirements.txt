@@ -1,0 +1,18 @@
+# ETL & Data Manipulation
+pandas
+requests
+schedule
+python-dotenv
+
+# Database Interaction
+sqlalchemy
+psycopg2-binary
+
+# Backend API
+fastapi
+uvicorn[standard]
+
+# Machine Learning
+scikit-learn
+xgboost
+joblib

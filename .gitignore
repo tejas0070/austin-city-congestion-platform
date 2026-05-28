@@ -1,0 +1,25 @@
+# Secrets — never commit these
+.env
+.env.*
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# ML model artifacts — binary files, regenerate with ml/train.py
+ml/models/
+*.joblib
+
+# Data files — regenerate with etl/ scripts
+data/raw/
+data/processed/
+
+# Jupyter
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+# Docker volumes & OS
+.DS_Store
+Thumbs.db

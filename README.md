@@ -1,6 +1,6 @@
 # Smart City Congestion Platform
 
-A platform for city traffic and event congestion intelligence.
+A platform for Austin city traffic and event congestion intelligence.
 
 ## Workspace Structure
 

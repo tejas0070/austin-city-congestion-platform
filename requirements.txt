@@ -1,5 +1,6 @@
 # ETL & Data Manipulation
 pandas
+numpy
 requests
 schedule
 python-dotenv
@@ -7,6 +8,13 @@ python-dotenv
 # Database Interaction
 sqlalchemy
 psycopg2-binary
+geoalchemy2>=0.14
+shapely>=2.0
+alembic>=1.13
+
+# HTTP & Resilience
+httpx>=0.27
+tenacity>=8.3
 
 # Backend API
 fastapi

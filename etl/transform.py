@@ -16,6 +16,7 @@ import math
 import os
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 
 RAW_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "raw")
@@ -38,6 +39,18 @@ def haversine_mi(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def _haversine_mi_vec(lat1: np.ndarray, lon1: np.ndarray,
+                      lat2: float, lon2: float) -> np.ndarray:
+    """Vectorized haversine: arrays of (lat1, lon1) against a single (lat2, lon2)."""
+    R = 3958.8
+    phi1 = np.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = np.radians(lat2 - lat1)
+    dlambda = np.radians(lon2 - lon1)
+    a = np.sin(dphi / 2) ** 2 + np.cos(phi1) * math.cos(phi2) * np.sin(dlambda / 2) ** 2
+    return R * 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+
+
 def load_csvs(prefix: str) -> pd.DataFrame:
     pattern = os.path.join(RAW_DIR, f"{prefix}_*.csv")
     files = sorted(glob.glob(pattern))
@@ -48,51 +61,57 @@ def load_csvs(prefix: str) -> pd.DataFrame:
 
 
 def attach_nearest_weather(traffic_df: pd.DataFrame, weather_df: pd.DataFrame) -> pd.DataFrame:
-    """Joins the most recent weather snapshot to each traffic corridor row by proximity."""
+    """Joins the most recent weather snapshot to each traffic corridor row by proximity.
+
+    Uses vectorized haversine distances instead of a Python loop — O(N*Z) numpy
+    operations where Z is the number of weather zones (≤5), much faster than
+    per-row Python math.
+    """
     weather_latest = (
         weather_df
         .sort_values("timestamp")
         .groupby("zone_name", as_index=False)
         .last()
+        .reset_index(drop=True)
     )
 
-    # Pre-build a list of (zone_name, lat, lon, row) for iteration efficiency
-    zones = [
-        (row["zone_name"], row["latitude"], row["longitude"], row)
+    t_lats = traffic_df["latitude"].to_numpy()
+    t_lons = traffic_df["longitude"].to_numpy()
+
+    # Build distance matrix: shape (n_traffic, n_zones)
+    dist_matrix = np.column_stack([
+        _haversine_mi_vec(t_lats, t_lons, row["latitude"], row["longitude"])
         for _, row in weather_latest.iterrows()
-    ]
+    ])
 
-    enriched_rows = []
-    for _, t_row in traffic_df.iterrows():
-        best_row = min(
-            zones,
-            key=lambda z: haversine_mi(t_row["latitude"], t_row["longitude"], z[1], z[2]),
-        )
-        zone_name, zone_lat, zone_lon, w_row = best_row
-        dist = haversine_mi(t_row["latitude"], t_row["longitude"], zone_lat, zone_lon)
+    best_zone_idx = dist_matrix.argmin(axis=1)
+    best_dists = dist_matrix[np.arange(len(traffic_df)), best_zone_idx]
 
-        enriched = t_row.to_dict()
-        enriched["nearest_weather_zone"] = zone_name
-        enriched["weather_zone_dist_mi"] = round(dist, 3)
-        for col in WEATHER_FEATURE_COLS:
-            enriched[f"weather_{col}"] = w_row[col]
-        enriched_rows.append(enriched)
+    result = traffic_df.copy()
+    result["nearest_weather_zone"] = weather_latest.loc[best_zone_idx, "zone_name"].values
+    result["weather_zone_dist_mi"] = np.round(best_dists, 3)
+    for col in WEATHER_FEATURE_COLS:
+        result[f"weather_{col}"] = weather_latest.loc[best_zone_idx, col].values
 
-    return pd.DataFrame(enriched_rows)
+    return result
 
 
 def attach_event_features(traffic_df: pd.DataFrame, events_df: pd.DataFrame) -> pd.DataFrame:
     """
     For each corridor row, counts how many events have their venue within
     that event's estimated congestion radius, and flags high-impact events.
+
+    Uses a vectorized distance matrix (N_traffic × N_events) instead of a
+    nested Python loop, cutting runtime from O(N*M) scalar math to one
+    numpy broadcast pass.
     """
     events_deduped = (
         events_df
         .sort_values("timestamp")
         .groupby("event_id", as_index=False)
         .last()
+        .reset_index(drop=True)
     )
-    # Normalise bool column — CSV round-trips it as string "True"/"False"
     events_deduped["is_high_traffic_impact"] = (
         events_deduped["is_high_traffic_impact"].astype(str).str.lower() == "true"
     )
@@ -100,36 +119,36 @@ def attach_event_features(traffic_df: pd.DataFrame, events_df: pd.DataFrame) -> 
         events_deduped["est_congestion_radius_mi"], errors="coerce"
     ).fillna(0.5)
 
-    # Drop events with missing venue coordinates
     valid_events = events_deduped[
         (events_deduped["venue_latitude"] != 0) | (events_deduped["venue_longitude"] != 0)
-    ].copy()
+    ].reset_index(drop=True)
 
-    # Pre-build tuples for fast iteration
-    event_tuples = list(
-        valid_events[["venue_latitude", "venue_longitude",
-                       "est_congestion_radius_mi", "is_high_traffic_impact"]].itertuples(index=False)
-    )
+    if valid_events.empty:
+        result = traffic_df.copy()
+        result["nearby_event_count"] = 0
+        result["has_high_impact_event"] = False
+        return result
 
-    nearby_counts = []
-    high_impact_flags = []
+    t_lats = traffic_df["latitude"].to_numpy()
+    t_lons = traffic_df["longitude"].to_numpy()
+    e_lats = valid_events["venue_latitude"].to_numpy()
+    e_lons = valid_events["venue_longitude"].to_numpy()
+    radii = valid_events["est_congestion_radius_mi"].to_numpy()
+    high_impact = valid_events["is_high_traffic_impact"].to_numpy()
 
-    for _, t_row in traffic_df.iterrows():
-        count = 0
-        high_impact = False
-        for e in event_tuples:
-            dist = haversine_mi(t_row["latitude"], t_row["longitude"],
-                                e.venue_latitude, e.venue_longitude)
-            if dist <= e.est_congestion_radius_mi:
-                count += 1
-                if e.is_high_traffic_impact:
-                    high_impact = True
-        nearby_counts.append(count)
-        high_impact_flags.append(high_impact)
+    # dist_matrix shape: (n_traffic, n_events)
+    dist_matrix = np.column_stack([
+        _haversine_mi_vec(t_lats, t_lons, e_lats[i], e_lons[i])
+        for i in range(len(valid_events))
+    ])
+
+    within = dist_matrix <= radii  # broadcast radii across rows
+    nearby_counts = within.sum(axis=1)
+    has_high_impact = (within & high_impact).any(axis=1)
 
     result = traffic_df.copy()
     result["nearby_event_count"] = nearby_counts
-    result["has_high_impact_event"] = high_impact_flags
+    result["has_high_impact_event"] = has_high_impact
     return result
 
 

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Float, Integer, String, DateTime, UniqueConstraint
+from sqlalchemy import Boolean, Column, Float, Index, Integer, String, DateTime, UniqueConstraint
 from sqlalchemy.sql import func
 
 from .database import Base
@@ -44,8 +44,8 @@ class WeatherCondition(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-class Event(Base):
-    __tablename__ = "events"
+class TicketmasterEvent(Base):
+    __tablename__ = "ticketmaster_events"
 
     id = Column(Integer, primary_key=True, index=True)
     timestamp = Column(DateTime(timezone=True), index=True)
@@ -71,7 +71,10 @@ class Event(Base):
 class MergedFeature(Base):
     """One row per (timestamp, corridor) with weather and event features joined in."""
     __tablename__ = "merged_features"
-    __table_args__ = (UniqueConstraint("timestamp", "corridor_name", name="uq_merged_ts_corridor"),)
+    __table_args__ = (
+        UniqueConstraint("timestamp", "corridor_name", name="uq_merged_ts_corridor"),
+        Index("ix_merged_corridor_ts", "corridor_name", "timestamp"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     timestamp = Column(DateTime(timezone=True), index=True)
@@ -108,3 +111,15 @@ class MergedFeature(Base):
     day_of_week = Column(Integer)
     is_weekend = Column(Integer)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CachedPrediction(Base):
+    """Pre-computed ML predictions written during ETL, read at request time."""
+    __tablename__ = "cached_predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    corridor_name = Column(String, unique=True, index=True, nullable=False)
+    predicted_congestion_index = Column(Float, nullable=True)
+    congestion_label = Column(String, nullable=True)
+    model_ready = Column(Boolean, default=False)
+    computed_at = Column(DateTime(timezone=True), server_default=func.now())

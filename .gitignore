@@ -29,3 +29,6 @@ cache/
 # Docker volumes & OS
 .DS_Store
 Thumbs.db
+
+# Superpowers brainstorming tool runtime state
+.superpowers/

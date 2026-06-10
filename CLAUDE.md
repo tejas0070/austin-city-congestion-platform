@@ -1,143 +1,235 @@
 # Project
 
-Austin Traffic Intelligence Platform — Collects live Austin traffic, weather, event, and construction data; stores it in PostgreSQL; runs ML congestion predictions; and exposes a Power BI–ready analytics API and interactive Leaflet map.
+Austin Traffic Intelligence Platform — Collects live Austin traffic, weather, event, and construction data; stores it in PostgreSQL; runs ML congestion predictions; and serves an interactive Streamlit app with a Folium map. Deployable to Streamlit Community Cloud in minutes.
 
 ## Intended Audience / Output
 
-* **Power BI dashboards** — five tabs: Executive Overview, Traffic Hotspots, Weather Impact, Event Impact, Predictive Forecast
-* **Interactive web map** — served at `localhost:8000`, Leaflet.js, real-time congestion markers
-* **REST API** — consumed by Power BI (Web connector or DirectQuery) and the frontend map
+* **Streamlit app** — single-page layout, map takes 70% of screen, sidebar holds all controls and stats
+* **Three tabs:** Live Map (default) · Event Impact · Weather Analysis
+* **Public URL** on Streamlit Community Cloud for portfolio / resume
+* **FastAPI backend** — retained for API-only consumers (Power BI, external tools)
+
+## App Layout
+
+```
++--sidebar (30%)--+--map (70%)--+
+| Time slider     |             |
+| Day selector    |  Folium map |
+| Event toggles   |  + layers   |
+| Weather drop    |             |
++-----------------|             |
+| City avg speed  |             |
+| Congestion idx  |             |
+| Top 3 corridors |             |
+| Delay severity  |             |
+| Weather impact  |             |
++-----------------+-------------+
+```
+
+### Sidebar Controls
+
+* Time slider — 12 AM to 11 PM in 30-minute increments
+* Day of week selector
+* Event toggles — Austin FC, UT Football, SXSW, ACL, Downtown events
+* Weather dropdown — Clear, Rain, Heavy Rain, Storm
+
+### Map Layers (all toggleable)
+
+* Congestion Heatmap — green→red gradient, updates with time slider
+* Predicted Congestion — ML output per road segment
+* Event Markers — venue pins with attendance + congestion impact on hover
+* Construction Zones — orange markers from Austin 311
+* Hotspot Circles — five highest-risk zones with delay estimates
 
 ## Stack
 
 * Python 3.11
-* FastAPI + Uvicorn
-* PostgreSQL 15 + PostGIS (via Docker)
+* Streamlit — app framework
+* Folium + streamlit-folium — interactive map
+* Pandas, NumPy — data handling
+* Scikit-learn (RandomForest) + Joblib — ML predictions
+* GeoJSON — road network and zone geometry
+* PostgreSQL 15 + PostGIS (Docker, local) / Supabase (deployed)
 * SQLAlchemy + GeoAlchemy2 + Alembic
-* Pandas, NumPy, Scikit-learn (RandomForest), Joblib
-* httpx + tenacity (async ETL fetchers)
-* Leaflet.js (frontend map)
-* Power BI Desktop (dashboard authoring)
+* httpx + tenacity — async ETL fetchers
+* FastAPI + Uvicorn — retained backend API
+* CartoDB Dark Matter — base map tiles
 * Docker + Docker Compose
-* Deployed locally with Docker (GCP deployment planned)
 
 ## Structure
 
-* `etl/` — async ETL fetchers (TomTom, OpenWeatherMap, Ticketmaster, Austin 311/construction), transform, and DB loader
-* `etl/fetchers/` — one file per data source; `pipeline.py` runs all concurrently
-* `backend/app/` — FastAPI app, SQLAlchemy models, database setup
-* `backend/routes/` — API routers: corridors, predictions, map_data, geo, analytics
-* `backend/services/` — data_service (DB queries), ml_service (inference wrapper)
-* `backend/static/` — Leaflet.js map (`index.html`)
-* `ml/` — `train.py` (offline), `predict.py` (inference), `models/` (joblib artifacts)
-* `dashboard/` — Power BI `.pbix` files and exported visuals
-* `data/raw/` — CSV snapshots from ETL fetchers
-* `data/processed/` — `merged_features.csv` after transform
-* `scripts/` — `setup.sh` (one-shot bootstrap for new contributors)
-* `tests/` — pytest unit and integration tests
-* `docs/` — architecture notes, `ml_pipeline.md`, Power BI connection guide
+```
+streamlit_app.py          # Entry point — sidebar, tabs, layout
+pages/
+  live_map.py             # Tab 1: Folium map with all layers
+  event_impact.py         # Tab 2: bar charts, before/during congestion
+  weather_analysis.py     # Tab 3: speed vs rainfall line charts
+components/
+  map_builder.py          # Folium map + layer construction
+  sidebar.py              # Controls and stat widgets
+  tooltips.py             # Hotspot and event hover HTML
+data/
+  raw/                    # ETL-fetched CSVs
+  processed/
+    merged_features.csv   # Primary analytics table (1 row per timestamp×corridor)
+  geo/
+    austin_roads.geojson  # Road network geometry
+    corridors.geojson     # 5 monitored corridor LineStrings
+    venues.geojson        # Event venue points
+    hotspots.geojson      # 5 high-risk zones
+    simulated_congestion.json  # Time-block congestion for prototype mode
+etl/                      # Async ETL pipeline
+  fetchers/
+    traffic.py            # TomTom Traffic Flow
+    weather.py            # OpenWeatherMap
+    events.py             # Ticketmaster Discovery (30-day window)
+    construction.py       # Austin 311 Roadway Work Zones (qyfh-gwei)
+    pipeline.py           # asyncio.gather over all four fetchers
+  transform.py            # Merges CSVs → merged_features.csv
+ml/
+  train.py                # Offline training
+  predict.py              # predict() + predict_with_confidence()
+  models/
+    congestion_rf.joblib  # Trained RandomForestRegressor
+    impact_encoder.joblib # LabelEncoder for weather_traffic_impact_level
+backend/
+  app/
+    main.py               # FastAPI app, lifespan, ETL scheduler
+    models.py             # MergedFeature, CachedPrediction SQLAlchemy models
+    geo_models.py         # RoadSegment, TrafficObservation, WeatherSnapshot, Event, RoadClosure
+    database.py           # SessionLocal, get_db, engine
+  routes/
+    analytics.py          # /api/analytics/* — flat JSON for Power BI / external consumers
+    map_data.py           # /api/map/corridors — 60s cached map feed
+    corridors.py          # /api/corridors/*
+    predictions.py        # /api/predictions/*
+    geo.py                # /api/geo/* (PostGIS spatial)
+  services/
+    analytics_service.py  # All aggregated query functions
+    ml_service.py         # predict_congestion() wrapper
+    data_service.py       # get_latest_for_corridor(), get_corridor_history()
+scripts/
+  setup.sh                # Bootstrap: Docker → Alembic → seed → ETL → retrain
+tests/                    # pytest
+alembic/                  # DB migrations
+```
 
 ## Data Sources
 
-| Source | What it provides | Fetcher file |
-| --- | --- | --- |
-| TomTom Traffic Flow API | Speed, free-flow speed, congestion index per corridor | `etl/fetchers/traffic.py` |
-| OpenWeatherMap Current | Temp, rain, wind, humidity, weather condition | `etl/fetchers/weather.py` |
-| Ticketmaster Discovery | Austin events in 48-hr window with venue coords | `etl/fetchers/events.py` |
-| Austin 311 / TxDOT | Road construction and lane closures | `etl/fetchers/construction.py` *(to build)* |
-| `holidays` Python pkg | US federal + Texas holidays | added in `etl/transform.py` |
+| Source | What it provides | Fetcher |
+|---|---|---|
+| TomTom Traffic Flow | Speed, free-flow speed, congestion index per corridor | `etl/fetchers/traffic.py` |
+| OpenWeatherMap | Temp, rain, wind, humidity, condition | `etl/fetchers/weather.py` |
+| Ticketmaster Discovery | Austin events, 30-day window, venue coords | `etl/fetchers/events.py` |
+| Austin 311 (Socrata `qyfh-gwei`) | Roadway Work Zones — active lane closures | `etl/fetchers/construction.py` |
+| `holidays` Python pkg | US federal + Texas holidays | `etl/transform.py` |
 
 ## Monitored Corridors
 
-I-35_Downtown, Mopac_Expressway_Downtown, US-183_North, Loop-360_West, Congress_Ave_Downtown
+I-35_Downtown · Mopac_Expressway_Downtown · US-183_North · Loop-360_West · Congress_Ave_Downtown
+
+Approximate centroids:
+
+| Corridor | Lat | Lon |
+|---|---|---|
+| I-35_Downtown | 30.269 | -97.7341 |
+| Mopac_Expressway_Downtown | 30.2764 | -97.7735 |
+| US-183_North | 30.3877 | -97.7232 |
+| Loop-360_West | 30.3278 | -97.7998 |
+| Congress_Ave_Downtown | 30.2672 | -97.7431 |
 
 ## Key DB Tables
 
 | Table | Purpose |
-| --- | --- |
-| `merged_features` | One row per (timestamp, corridor) — primary analytics table |
+|---|---|
+| `merged_features` | One row per (timestamp, corridor) — primary analytics source |
 | `cached_predictions` | Pre-computed ML results written each ETL cycle |
 | `road_segments` | PostGIS LINESTRING geometries per corridor |
 | `traffic_observations` | Raw speed readings linked to road segments |
 | `weather_snapshots` | Weather readings with PostGIS POINT geometry |
 | `events` | Ticketmaster events with venue geometry and subtype tag |
-| `road_closures` | Construction / lane closure records *(to build)* |
-
-## API Routers
-
-| Prefix | File | Purpose |
-| --- | --- | --- |
-| `/api/corridors` | `routes/corridors.py` | Latest + history per corridor |
-| `/api/predictions` | `routes/predictions.py` | Live ML prediction per corridor |
-| `/api/map` | `routes/map_data.py` | All corridors + cached predictions (60s cache) |
-| `/api/geo` | `routes/geo.py` | PostGIS spatial queries |
-| `/api/analytics` | `routes/analytics.py` | Aggregated flat data for Power BI *(to build)* |
-
-## Power BI Dashboard Tabs
-
-1. **Executive Overview** — avg speed, congestion index, top corridors, daily trend
-2. **Traffic Hotspot Analysis** — corridor map, bottleneck ranking, construction overlays
-3. **Weather Impact** — rain/temp/wind vs avg congestion, storm impact
-4. **Event Impact** — before/during/after congestion per event type (Austin FC, UT football, ACL, SXSW, concerts)
-5. **Predictive Forecast** — next 6-hr congestion forecast per corridor, confidence bands
-
-Power BI connects via **Web connector** to `/api/analytics/*` endpoints. Each analytics endpoint returns flat tabular JSON (list of objects with scalar values only — no nested geometry).
-
-## Event Subtypes
-
-Events fetched from Ticketmaster are classified into subtypes for the Event Impact dashboard:
-
-* `austin_fc` — Q2 Stadium events tagged Austin FC
-* `ut_football` — DKR-Texas Memorial Stadium football games
-* `concert` — Music segment events
-* `festival` — ACL, SXSW, and multi-day festivals
-* `sports_other` — Other Sports segment events
-* `other` — everything else
+| `road_closures` | Austin 311 Roadway Work Zone records |
 
 ## ML Model
 
-* Algorithm: `RandomForestRegressor` (200 trees, max_depth=10)
+* Algorithm: RandomForestRegressor (200 trees, max_depth=10)
 * Target: `congestion_index` (0.0 free-flow → 1.0 standstill)
-* Features: speed, free-flow speed, 6 weather fields, nearby event count, hour, day, is_weekend, is_holiday, weather impact level
-* Confidence: std deviation across individual tree predictions (expose as `confidence_low` / `confidence_high`)
-* Trained offline via `python ml/train.py` after ETL has populated enough history
+* 13 features: current_speed_mph, free_flow_speed_mph, weather_temp_f, weather_humidity_pct, weather_wind_speed_mph, weather_cloud_cover_pct, weather_rain_1h_mm, nearby_event_count, hour_of_day, day_of_week, is_weekend, is_holiday, weather_traffic_impact_level
+* Confidence bands via tree std deviation → confidence_low / confidence_high
 * Artifacts: `ml/models/congestion_rf.joblib`, `ml/models/impact_encoder.joblib`
-* Future forecasts: `GET /api/analytics/forecast?corridor=...&hours_ahead=6` synthesizes future feature vectors
+
+## Event Subtypes
+
+* `austin_fc` — Q2 Stadium (30.3872, -97.7188)
+* `ut_football` — DKR-Texas Memorial Stadium (30.2836, -97.7320)
+* `concert` — Music segment events
+* `festival` — ACL (Zilker Park: 30.2669, -97.7730), SXSW (Downtown)
+* `sports_other` — other Sports segment events
+* `other` — everything else
+
+## Prototype / Simulated Data
+
+When `USE_SIMULATED_DATA=true` in `.env` (or no DB available), the app reads from:
+* `data/geo/simulated_congestion.json` — congestion values per corridor per 30-min time block
+* `data/geo/venues.geojson` — static event venue points
+* Weather multipliers applied in `components/map_builder.py`
+
+This lets the app run completely offline for demos. The visual structure is identical to live mode.
+
+## API Routers (FastAPI backend)
+
+| Prefix | File | Purpose |
+|---|---|---|
+| `/api/analytics` | `routes/analytics.py` | Flat aggregated data for Power BI |
+| `/api/map` | `routes/map_data.py` | All corridors + cached predictions (60s TTL) |
+| `/api/corridors` | `routes/corridors.py` | Latest + history per corridor |
+| `/api/predictions` | `routes/predictions.py` | Live ML prediction per corridor |
+| `/api/geo` | `routes/geo.py` | PostGIS spatial queries |
+
+Analytics endpoints return flat list[dict] — no geometry, no nested objects (Power BI requirement).
+
+## Deployment
+
+* **Local:** `streamlit run streamlit_app.py` on port 8501
+* **Streamlit Cloud:** push to GitHub → share.streamlit.io → set secrets → Deploy
+* **Database (deployed):** Supabase free tier — set `DATABASE_URL` in Streamlit secrets
+* **FastAPI (optional):** `uvicorn backend.app.main:app --reload` on port 8000
 
 ## Commands
 
-* Dev server: `uvicorn backend.app.main:app --reload`
-* Docker: `docker-compose up --build`
-* Bootstrap (first time): `bash scripts/setup.sh`
-* Train ML model: `python ml/train.py`
-* Run ETL manually: `python etl/run_all_etl.py`
+* Streamlit app: `streamlit run streamlit_app.py`
+* FastAPI server: `uvicorn backend.app.main:app --reload`
+* Bootstrap: `bash scripts/setup.sh`
+* Run ETL: `python -m etl.fetchers.pipeline`
+* ETL dry-run: `python -m etl.fetchers.pipeline --dry-run`
+* Transform: `python etl/transform.py`
+* Train ML: `python ml/train.py`
 * Test: `pytest`
 * Lint: `flake8 .`
 
 ## Verification
 
-After every change, run in this order:
-
-1. `python -m py_compile backend/**/*.py` — fix syntax/type errors
-2. `pytest` — fix failing tests
-3. `flake8 .` — fix lint errors
+After any change:
+1. `python -m py_compile streamlit_app.py pages/*.py components/*.py` — syntax
+2. `pytest` — tests
+3. `flake8 .` — lint
+4. `streamlit run streamlit_app.py` — visual check
 
 ## Conventions
 
-* Use FastAPI routers for all API endpoints
-* Analytics endpoints must return **flat list-of-dicts** (no nested objects, no geometry) — Power BI requirement
-* Store configuration in `.env` files — never hardcode keys
-* Use snake_case for Python files and database columns
-* Keep ETL, ML, backend, and dashboard logic in separate directories
-* ETL fetchers are async (`httpx.AsyncClient`); one file per data source
-* Spatial queries use `ST_DWithin` on `::geography` cast (meters, not degrees)
-* In-process cache on `/api/map/corridors` has a 60s TTL (`_MAP_CACHE` dict in `map_data.py`)
-* ML predictions are pre-computed during ETL and stored in `cached_predictions` — never run inference in the map hot path
+* Streamlit app is the primary user-facing product; FastAPI is secondary
+* Prototype mode (`USE_SIMULATED_DATA=true`) must always work without DB or API keys
+* Map layers are constructed in `components/map_builder.py` — not inline in pages
+* Sidebar controls are defined in `components/sidebar.py` — return a plain dict of selections
+* Analytics endpoints return flat list[dict] — no geometry, no nested objects
+* ETL fetchers are async (httpx.AsyncClient); one file per data source
+* ML predictions are pre-computed during ETL — never run inference in the Streamlit hot path
+* Use snake_case for Python files and DB columns
 
-## Don’t
+## Don't
 
-* Don’t hardcode API keys — use environment variables
-* Don’t mix dashboard logic into backend services
-* Don’t train models inside API routes — use `ml/train.py` offline
-* Don’t return geometry objects from analytics endpoints — Power BI can’t deserialize WKB/GeoJSON directly
-* Don’t add raw event rows or raw weather rows to analytics endpoints — aggregate first
+* Don't run ML inference inside Streamlit callbacks — read from cached_predictions or merged_features
+* Don't return geometry from analytics endpoints
+* Don't hardcode API keys — use .env (local) or Streamlit secrets (deployed)
+* Don't put map construction logic inline in pages — use map_builder.py
+* Don't aggregate raw rows in the frontend — use analytics_service.py or pre-aggregated CSVs

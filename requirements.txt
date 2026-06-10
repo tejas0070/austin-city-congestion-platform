@@ -1,9 +1,16 @@
+# Streamlit app
+streamlit>=1.35
+folium>=0.17
+streamlit-folium>=0.20
+plotly>=5.22
+
 # ETL & Data Manipulation
 pandas
 numpy
 requests
 schedule
 python-dotenv
+holidays>=0.46
 
 # Database Interaction
 sqlalchemy
@@ -16,11 +23,10 @@ alembic>=1.13
 httpx>=0.27
 tenacity>=8.3
 
-# Backend API
+# Backend API (retained for Power BI / external consumers)
 fastapi
 uvicorn[standard]
 
 # Machine Learning
 scikit-learn
-xgboost
 joblib

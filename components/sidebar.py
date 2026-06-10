@@ -56,21 +56,72 @@ def advance_step(time_slot: int, is_playing: bool) -> tuple[int, bool]:
     return MAX_SLOT, False
 
 
-def render_controls() -> dict:
-    """Render sidebar controls and return current selections as a dict."""
-    st.sidebar.markdown("## Controls")
+@st.fragment(run_every="2s")
+def _time_controls() -> None:
+    """
+    Fragment that owns the time slider and transport controls.
 
-    time_slot = st.sidebar.slider(
-        "Time of Day",
+    Auto-reruns every 2 seconds. When playing, advances time_slot by one
+    step and triggers a full-app rerun so the map updates. When idle the
+    fragment reruns silently — no state change, no full-app rerun.
+    """
+    new_slot, new_playing = advance_step(
+        st.session_state["time_slot"],
+        st.session_state["is_playing"],
+    )
+    state_changed = (
+        new_slot != st.session_state["time_slot"]
+        or new_playing != st.session_state["is_playing"]
+    )
+    if state_changed:
+        st.session_state["time_slot"] = new_slot
+        st.session_state["is_playing"] = new_playing
+        st.rerun()  # full-app rerun so the map layer updates
+
+    st.sidebar.markdown("**Time of Day**")
+    st.sidebar.caption(f"**{slot_to_label(st.session_state['time_slot'])}**")
+
+    new_val = st.sidebar.slider(
+        "time_slot_slider",
         min_value=0,
         max_value=MAX_SLOT,
-        value=34,  # default 5:00 PM
+        value=st.session_state["time_slot"],
         format="%d",
-        help="Each step is 30 minutes. Slot 0 = 12:00 AM, slot 34 = 5:00 PM.",
+        label_visibility="collapsed",
+        disabled=st.session_state["is_playing"],
+        key="time_slider_widget",
     )
-    st.sidebar.caption(f"Selected: **{slot_to_label(time_slot)}**")
+    if new_val != st.session_state["time_slot"]:
+        st.session_state["time_slot"] = new_val
+        st.rerun()
 
-    day = st.sidebar.selectbox("Day of Week", DAYS, index=0)  # Monday default
+    col1, col2, col3 = st.sidebar.columns([1, 2, 1])
+    with col1:
+        if st.button("⏮", key="btn_rewind", help="Rewind to 12:00 AM"):
+            st.session_state["time_slot"] = 0
+            st.session_state["is_playing"] = False
+            st.rerun()
+    with col2:
+        play_label = "⏸ Pause" if st.session_state["is_playing"] else "▶ Play"
+        if st.button(play_label, key="btn_play", use_container_width=True):
+            st.session_state["is_playing"] = not st.session_state["is_playing"]
+    with col3:
+        if st.button("⏭", key="btn_skip", help="Skip to 11:30 PM"):
+            st.session_state["time_slot"] = MAX_SLOT
+            st.session_state["is_playing"] = False
+            st.rerun()
+
+
+def render_controls() -> dict:
+    """Render sidebar controls and return current selections as a dict."""
+    st.session_state.setdefault("time_slot", 34)  # default 5:00 PM
+    st.session_state.setdefault("is_playing", False)
+
+    st.sidebar.markdown("## Controls")
+
+    _time_controls()
+
+    day = st.sidebar.selectbox("Day of Week", DAYS, index=0)
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("**Active Events**")
@@ -85,6 +136,7 @@ def render_controls() -> dict:
     st.sidebar.markdown("---")
     weather = st.sidebar.selectbox("Weather Condition", WEATHER_OPTIONS, index=0)
 
+    time_slot = st.session_state["time_slot"]
     return {
         "time_slot": time_slot,
         "time_label": slot_to_label(time_slot),

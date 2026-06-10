@@ -63,7 +63,7 @@ def render_controls() -> dict:
     time_slot = st.sidebar.slider(
         "Time of Day",
         min_value=0,
-        max_value=47,
+        max_value=MAX_SLOT,
         value=34,  # default 5:00 PM
         format="%d",
         help="Each step is 30 minutes. Slot 0 = 12:00 AM, slot 34 = 5:00 PM.",

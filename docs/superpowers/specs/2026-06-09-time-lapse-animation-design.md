@@ -1,4 +1,5 @@
 # Time-Lapse Animation Design
+
 **Date:** 2026-06-09
 **Project:** Austin Traffic Intelligence Platform
 **Feature:** Animated time-lapse mode for the Live Map tab
@@ -13,27 +14,29 @@ Add a Play/Pause/Rewind/Skip transport control row to the sidebar time controls.
 
 ## Decisions
 
-| Question | Decision |
+|Question|Decision|
 |---|---|
-| End behavior | Stop at 11:30 PM, reset to Play (no loop) |
-| Speed | 2 seconds per 30-minute step |
-| UI placement | Transport controls row below time display (⏮ ▶/⏸ ⏭) |
-| Implementation | `@st.fragment(run_every="2s")` — no `time.sleep` |
-| Time range | 48 slots: 12:00 AM through 11:30 PM (full 24-hour coverage) |
+|End behavior|Stop at 11:30 PM, reset to Play (no loop)|
+|Speed|2 seconds per 30-minute step|
+|UI placement|Transport controls row below time display (⏮ ▶/⏸ ⏭)|
+|Implementation|`@st.fragment(run_every="2s")` — no `time.sleep`|
+|Time range|48 slots: 12:00 AM through 11:30 PM (full 24-hour coverage)|
 
 ---
 
 ## Time Steps
 
-`TIME_STEPS` is a list of 48 strings defined once in `components/sidebar.py` and imported where needed:
+`slot_to_label(slot)` is a pure function defined in `components/sidebar.py` that converts a 0-based slot index to a readable time string:
 
-```
-["12:00 AM", "12:30 AM", "1:00 AM", ..., "11:00 PM", "11:30 PM"]
+```text
+slot_to_label(0)  → "12:00 AM"
+slot_to_label(34) → "5:00 PM"  (default)
+slot_to_label(47) → "11:30 PM" (MAX_SLOT)
 ```
 
 - Index 0 → 12:00 AM
-- Index 15 → 7:30 AM (preserved default)
-- Index 47 → 11:30 PM (`MAX_STEP`)
+- Index 34 → 5:00 PM (default)
+- Index 47 → 11:30 PM (`MAX_SLOT`)
 
 ---
 
@@ -43,20 +46,20 @@ Two keys are added to `st.session_state`:
 
 | Key | Type | Default | Purpose |
 |---|---|---|---|
-| `time_step` | int (0–47) | 15 | Current time slot index |
+| `time_slot` | int (0–47) | 34 | Current time slot index (34 = 5:00 PM) |
 | `is_playing` | bool | False | Whether animation is running |
 
 The time controls section of `components/sidebar.py` is extracted into a `@st.fragment(run_every="2s")` function `_time_controls()`.
 
 **Fragment tick logic (runs every 2 seconds):**
 
-```
+```python
 if is_playing:
-    if time_step < MAX_STEP:
-        time_step += 1
-    else:
-        is_playing = False
-    st.rerun()   # full-app rerun → map updates
+  if time_slot < MAX_SLOT:
+    time_slot += 1
+  else:
+    is_playing = False
+  st.rerun()   # full-app rerun → map updates
 # else: fragment reruns silently, main app does not rerun
 ```
 
@@ -68,37 +71,37 @@ When `is_playing` is False, the fragment ticks every 2 seconds but takes no acti
 
 ### `components/sidebar.py`
 
-1. Define `TIME_STEPS` (48-entry list) and `MAX_STEP = 47` as module-level constants.
-2. Initialize session state at module top:
+1. Define `MAX_SLOT = 47` and `slot_to_label(slot: int) -> str` as module-level constants/functions.
+2. Initialize session state inside `render_controls()`:
    ```python
-   st.session_state.setdefault("time_step", 15)
+   st.session_state.setdefault("time_slot", 34)  # default 5:00 PM
    st.session_state.setdefault("is_playing", False)
    ```
-3. Extract `advance_step(time_step: int, is_playing: bool) -> tuple[int, bool]` as a module-level pure function (used by the fragment and by tests).
+3. Extract `advance_step(time_slot: int, is_playing: bool) -> tuple[int, bool]` as a module-level pure function (used by the fragment and by tests).
 4. Extract `_time_controls()` as a `@st.fragment(run_every="2s")` function containing:
    - Animation tick logic (see above)
-   - Time label display: `TIME_STEPS[st.session_state.time_step]`
-   - Time slider (`disabled=True` during playback) synced to `st.session_state.time_step`
+   - Time label display: `slot_to_label(st.session_state["time_slot"])`
+   - Time slider (`disabled=True` during playback) synced to `st.session_state["time_slot"]`
    - Transport controls row — three equal columns:
-     - **⏮** — sets `time_step = 0`, `is_playing = False`
+     - **⏮** — sets `time_slot = 0`, `is_playing = False`
      - **▶ Play / ⏸ Pause** — toggles `is_playing`
-     - **⏭** — sets `time_step = MAX_STEP`, `is_playing = False`
-5. In `render_controls()`, call `_time_controls()` then read `st.session_state.time_step` when building the returned `selections` dict (replaces the old slider return value).
+     - **⏭** — sets `time_slot = MAX_SLOT`, `is_playing = False`
+5. In `render_controls()`, call `_time_controls()` then read `st.session_state["time_slot"]` when building the returned `selections` dict (replaces the old slider return value).
 
 ### `pages/live_map.py`
 
-No structural changes. Receives `selections["time_step"]` as an int index. Uses `TIME_STEPS[selections["time_step"]]` for any display labels.
+No structural changes. Already reads `selections["time_slot"]` as an int index.
 
 ### `components/map_builder.py`
 
-No structural changes. Receives `selections` (with `time_step` int), derives the label internally as `TIME_STEPS[selections["time_step"]]`, and uses it to key into `simulated_congestion.json` — same lookup pattern as before.
+No structural changes. Already uses `selections["time_slot"]` as an int array index.
 
 ---
 
 ## Data Flow
 
-```
-st.session_state.time_step (int)
+```text
+st.session_state["time_slot"] (int)
         │
         ▼
 _time_controls() fragment
@@ -107,11 +110,11 @@ _time_controls() fragment
         │
         ▼
 render_controls() → selections dict
-  selections["time_step"] = st.session_state.time_step
+  selections["time_slot"] = st.session_state["time_slot"]
         │
         ▼
 live_map.render(selections)
-  label = TIME_STEPS[selections["time_step"]]
+  label = slot_to_label(selections["time_slot"])
         │
         ▼
 map_builder.build_map(selections)
@@ -138,11 +141,13 @@ New file: `tests/test_time_steps.py`
 The tick logic is extracted into a pure function `advance_step(time_step, is_playing)` → `(new_time_step, new_is_playing)` so it can be tested without Streamlit.
 
 Test cases:
-- `TIME_STEPS` has exactly 48 entries
-- `TIME_STEPS[0]` == `"12:00 AM"`
-- `TIME_STEPS[47]` == `"11:30 PM"`
-- No duplicate entries in `TIME_STEPS`
-- `advance_step(14, True)` → `(15, True)` — normal increment
+
+- `MAX_SLOT == 47`
+- `slot_to_label(0)` == `"12:00 AM"`
+- `slot_to_label(47)` == `"11:30 PM"`
+- `slot_to_label(34)` == `"5:00 PM"` (default)
+- All 48 labels are unique
+- `advance_step(34, True)` → `(35, True)` — normal increment
 - `advance_step(47, True)` → `(47, False)` — stop at max
 - `advance_step(47, False)` → `(47, False)` — no-op when not playing
 - `advance_step(0, False)` → `(0, False)` — idle at start

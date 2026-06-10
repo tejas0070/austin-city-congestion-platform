@@ -74,7 +74,8 @@ When `is_playing` is False, the fragment ticks every 2 seconds but takes no acti
    st.session_state.setdefault("time_step", 15)
    st.session_state.setdefault("is_playing", False)
    ```
-3. Extract `_time_controls()` as a `@st.fragment(run_every="2s")` function containing:
+3. Extract `advance_step(time_step: int, is_playing: bool) -> tuple[int, bool]` as a module-level pure function (used by the fragment and by tests).
+4. Extract `_time_controls()` as a `@st.fragment(run_every="2s")` function containing:
    - Animation tick logic (see above)
    - Time label display: `TIME_STEPS[st.session_state.time_step]`
    - Time slider (`disabled=True` during playback) synced to `st.session_state.time_step`
@@ -82,7 +83,7 @@ When `is_playing` is False, the fragment ticks every 2 seconds but takes no acti
      - **⏮** — sets `time_step = 0`, `is_playing = False`
      - **▶ Play / ⏸ Pause** — toggles `is_playing`
      - **⏭** — sets `time_step = MAX_STEP`, `is_playing = False`
-4. In `render_controls()`, call `_time_controls()` then read `st.session_state.time_step` when building the returned `selections` dict (replaces the old slider return value).
+5. In `render_controls()`, call `_time_controls()` then read `st.session_state.time_step` when building the returned `selections` dict (replaces the old slider return value).
 
 ### `pages/live_map.py`
 
@@ -90,7 +91,7 @@ No structural changes. Receives `selections["time_step"]` as an int index. Uses 
 
 ### `components/map_builder.py`
 
-No structural changes. Receives the time label string derived from `TIME_STEPS[time_step]` and uses it to key into `simulated_congestion.json` — same as before.
+No structural changes. Receives `selections` (with `time_step` int), derives the label internally as `TIME_STEPS[selections["time_step"]]`, and uses it to key into `simulated_congestion.json` — same lookup pattern as before.
 
 ---
 

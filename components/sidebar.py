@@ -91,13 +91,13 @@ def _time_controls() -> None:
         disabled=st.session_state["is_playing"],
         key="time_slider_widget",
     )
-    if new_val != st.session_state["time_slot"]:
+    if not st.session_state["is_playing"] and new_val != st.session_state["time_slot"]:
         st.session_state["time_slot"] = new_val
         st.rerun()
 
-    col1, col2, col3 = st.sidebar.columns([1, 2, 1])
+    col1, col2, col3 = st.sidebar.columns([1, 1, 1])
     with col1:
-        if st.button("⏮", key="btn_rewind", help="Rewind to 12:00 AM"):
+        if st.button("⏮", key="btn_rewind", help="Rewind to 12:00 AM", use_container_width=True):
             st.session_state["time_slot"] = 0
             st.session_state["is_playing"] = False
             st.rerun()
@@ -105,6 +105,7 @@ def _time_controls() -> None:
         play_label = "⏸ Pause" if st.session_state["is_playing"] else "▶ Play"
         if st.button(play_label, key="btn_play", use_container_width=True):
             st.session_state["is_playing"] = not st.session_state["is_playing"]
+            st.rerun()
     with col3:
         if st.button("⏭", key="btn_skip", help="Skip to 11:30 PM"):
             st.session_state["time_slot"] = MAX_SLOT

@@ -78,10 +78,10 @@ def _time_controls() -> None:
         st.session_state["is_playing"] = new_playing
         st.rerun()  # full-app rerun so the map layer updates
 
-    st.sidebar.markdown("**Time of Day**")
-    st.sidebar.caption(f"**{slot_to_label(st.session_state['time_slot'])}**")
+    st.markdown("**Time of Day**")
+    st.caption(f"**{slot_to_label(st.session_state['time_slot'])}**")
 
-    new_val = st.sidebar.slider(
+    new_val = st.slider(
         "time_slot_slider",
         min_value=0,
         max_value=MAX_SLOT,
@@ -95,7 +95,7 @@ def _time_controls() -> None:
         st.session_state["time_slot"] = new_val
         st.rerun()
 
-    col1, col2, col3 = st.sidebar.columns([1, 1, 1])
+    col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
         if st.button("⏮", key="btn_rewind", help="Rewind to 12:00 AM", use_container_width=True):
             st.session_state["time_slot"] = 0
@@ -120,7 +120,8 @@ def render_controls() -> dict:
 
     st.sidebar.markdown("## Controls")
 
-    _time_controls()
+    with st.sidebar:
+        _time_controls()
 
     day = st.sidebar.selectbox("Day of Week", DAYS, index=0)
 

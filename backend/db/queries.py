@@ -25,8 +25,8 @@ def get_historical_traffic(
 
     return [
         build_point_feature(
-            r.latitude or 0,
-            r.longitude or 0,
+            r.latitude,
+            r.longitude,
             {
                 "segment_id": r.segment_id,
                 "road_name": r.road_name,

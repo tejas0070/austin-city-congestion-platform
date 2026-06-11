@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+# NOTE: _store is per-process. In a multi-worker deployment (gunicorn/uvicorn --workers N)
+# each worker maintains an independent cache. Use Redis for a shared cache.
 _store: dict[str, tuple] = {}
 
 

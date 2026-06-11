@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from ...api.dependencies import get_db
+from ..dependencies import get_db
 from ...db.queries import get_historical_traffic
 from ...services.txdot_service import fetch_live_traffic, fetch_incidents
 from ...utils.geojson_builder import build_feature_collection

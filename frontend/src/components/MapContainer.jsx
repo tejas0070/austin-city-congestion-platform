@@ -5,6 +5,7 @@ import { addDataToMap } from '@kepler.gl/actions';
 import { processGeojson } from '@kepler.gl/processors';
 import { AUSTIN_VIEWPORT } from '../constants/austinBounds';
 
+const SIDEBAR_WIDTH_PX = 320;
 const MAP_ID = 'austin_traffic_map';
 
 export default function MapContainer({ liveTraffic, incidents, mapboxToken }) {
@@ -43,7 +44,7 @@ export default function MapContainer({ liveTraffic, incidents, mapboxToken }) {
       <KeplerGl
         id={MAP_ID}
         mapboxApiAccessToken={mapboxToken}
-        width={window.innerWidth - 320}
+        width={window.innerWidth - SIDEBAR_WIDTH_PX}
         height={window.innerHeight}
       />
     </div>

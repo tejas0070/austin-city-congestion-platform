@@ -1,6 +1,6 @@
 from sqlalchemy import (
-    Boolean, Column, Float, Index, Integer,
-    String, DateTime, Text, UniqueConstraint,
+    Boolean, CheckConstraint, Column, Date, Float, Index, Integer,
+    String, DateTime, Text, Time, UniqueConstraint,
 )
 from sqlalchemy.sql import func
 from .database import Base
@@ -60,7 +60,7 @@ class TrafficIncident(Base):
     incident_id = Column(String, unique=True, index=True, nullable=False)
     incident_type = Column(String)   # accident / closure / construction / hazard
     description = Column(Text)
-    severity = Column(Integer)       # 1–4
+    severity = Column(Integer, CheckConstraint("severity BETWEEN 1 AND 4"))  # 1–4
     latitude = Column(Float)
     longitude = Column(Float)
     start_time = Column(DateTime(timezone=True))
@@ -81,8 +81,8 @@ class Event(Base):
     source = Column(String, nullable=False)  # ticketmaster / austin_fc / ut_athletics
     name = Column(String, nullable=False)
     venue = Column(String)
-    event_date = Column(String)   # ISO date "YYYY-MM-DD"
-    event_time = Column(String)
+    event_date = Column(Date)
+    event_time = Column(Time)
     latitude = Column(Float)
     longitude = Column(Float)
     category = Column(String)              # Sports / Music / Festival

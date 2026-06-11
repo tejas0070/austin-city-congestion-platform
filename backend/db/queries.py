@@ -44,5 +44,5 @@ def get_historical_traffic(
             },
         )
         for r in readings
-        if r.latitude and r.longitude
+        if r.latitude is not None and r.longitude is not None
     ]

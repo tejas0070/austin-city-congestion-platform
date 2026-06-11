@@ -7,19 +7,32 @@ React 18 + kepler.gl frontend with a FastAPI backend. Visualizes real-time Austi
 - **Frontend:** React 18, Redux, @kepler.gl/components v3, Mapbox GL JS, Tailwind CSS, Axios
 - **Backend:** FastAPI, SQLAlchemy 2.0, PostgreSQL, Alembic, httpx
 - **Data:** TxDOT (traffic + incidents), Open-Meteo (weather, free, no key), Ticketmaster (events), Austin 311 (construction)
+- **Build:** CRACO (CRA 5 + webpack polyfills for kepler.gl)
 
-## Project Structure (in progress — React migration)
+## Project Structure
 
 ```
-frontend/              React 18 + kepler.gl app (being built)
-backend/               FastAPI backend (being restructured)
-  main.py              FastAPI entry point
-  api/routes/          /api/traffic, /api/events, /api/weather
-  db/                  SQLAlchemy models + queries
-  services/            TxDOT, Open-Meteo, Ticketmaster, Austin 311
-  utils/               GeoJSON builder + in-memory TTL cache
-data/geo/              Static Austin GeoJSON (venues, corridors, hotspots)
-notebooks/             Phase 2: ML model training (placeholder)
+frontend/              React 18 + kepler.gl app
+  src/
+    App.js             Root component
+    index.js           React 18 entry point
+    store.js           Redux store
+    components/        MapContainer, Sidebar, EventCard, LayerToggle, TrafficLegend, LoadingOverlay
+    hooks/             useTrafficData, useEvents, useWeather
+    services/          api.js, trafficService, eventsService, weatherService
+    constants/         austinBounds.js
+    utils/             colorScales.js, geoHelpers.js
+  public/index.html
+  package.json         React 18, kepler.gl v3, CRACO build
+  craco.config.js      Webpack polyfills for kepler.gl
+  tailwind.config.js
+backend/               FastAPI backend
+  main.py              FastAPI entry point with CORS
+  api/routes/          traffic.py, events.py, weather.py
+  db/                  database.py, models.py, queries.py
+  services/            txdot_service, weather_service, events_service, construction_service
+  utils/               cache.py, geojson_builder.py
+tests/                 pytest tests (backend)
 alembic/               DB migrations
 ```
 
@@ -49,6 +62,7 @@ REACT_APP_API_BASE_URL=http://localhost:8000
 | Run DB migrations | `alembic upgrade head` |
 | Run Python tests | `pytest` |
 | Run JS tests | `cd frontend && npm test` |
+| Build frontend | `cd frontend && npm run build` |
 
 ## Data Sources
 

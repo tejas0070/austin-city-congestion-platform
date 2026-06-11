@@ -1,7 +1,9 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import httpx
 from ..utils.cache import get_cache, set_cache
+
+_UTC = timezone.utc
 
 CACHE_KEY = "events_upcoming"
 CACHE_TTL = 3600  # 1 hour
@@ -53,8 +55,9 @@ def _get_hardcoded_events(
     attendance: int,
     days: int,
 ) -> list[dict]:
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    cutoff = (datetime.utcnow() + timedelta(days=days)).strftime("%Y-%m-%d")
+    now = datetime.now(_UTC)
+    today = now.strftime("%Y-%m-%d")
+    cutoff = (now + timedelta(days=days)).strftime("%Y-%m-%d")
     venue = VENUE_COORDS[source]
     return [
         {
@@ -79,8 +82,9 @@ async def _fetch_ticketmaster_events(days: int) -> list[dict]:
     if not api_key:
         return []
 
-    start = datetime.utcnow().strftime("%Y-%m-%dT00:00:00Z")
-    end = (datetime.utcnow() + timedelta(days=days)).strftime("%Y-%m-%dT23:59:59Z")
+    now = datetime.now(_UTC)
+    start = now.strftime("%Y-%m-%dT00:00:00Z")
+    end = (now + timedelta(days=days)).strftime("%Y-%m-%dT23:59:59Z")
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:

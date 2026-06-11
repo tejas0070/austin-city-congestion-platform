@@ -12,6 +12,7 @@ async def fetch_construction_zones() -> dict:
     if cached:
         return cached
 
+    error = False
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
@@ -25,10 +26,11 @@ async def fetch_construction_zones() -> dict:
             zones = resp.json()
         features = [f for z in zones for f in [_parse_zone(z)] if f]
     except Exception:
+        error = True
         features = []
 
     result = build_feature_collection(features)
-    set_cache(CACHE_KEY, result, CACHE_TTL)
+    set_cache(CACHE_KEY, result, 30 if error else CACHE_TTL)
     return result
 
 

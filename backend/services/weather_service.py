@@ -25,6 +25,7 @@ async def fetch_current_weather() -> dict:
     if cached:
         return cached
 
+    error = False
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(OPEN_METEO_URL, params={
@@ -46,6 +47,7 @@ async def fetch_current_weather() -> dict:
             "rain_alert": (current.get("precipitation") or 0) > 0.004,
         }
     except Exception:
+        error = True
         result = {
             "temperature_f": 78.0,
             "precipitation_in": 0.0,
@@ -55,5 +57,5 @@ async def fetch_current_weather() -> dict:
             "rain_alert": False,
         }
 
-    set_cache(CACHE_KEY, result, CACHE_TTL)
+    set_cache(CACHE_KEY, result, 30 if error else CACHE_TTL)
     return result

@@ -32,3 +32,7 @@ Thumbs.db
 
 # Superpowers brainstorming tool runtime state
 .superpowers/
+
+# Node modules — frontend dependencies
+node_modules/
+frontend/node_modules/

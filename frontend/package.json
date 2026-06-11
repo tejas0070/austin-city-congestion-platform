@@ -13,20 +13,31 @@
     "@kepler.gl/processors": "^3.1.0",
     "@kepler.gl/styles": "^3.1.0",
     "@kepler.gl/constants": "^3.1.0",
-    "mapbox-gl": "^2.15.0",
     "date-fns": "^3.6.0",
     "axios": "^1.7.0"
   },
   "devDependencies": {
+    "@craco/craco": "^7.1.0",
     "react-scripts": "5.0.1",
     "tailwindcss": "^3.4.0",
     "autoprefixer": "^10.4.0",
-    "postcss": "^8.4.0"
+    "postcss": "^8.4.0",
+    "stream-browserify": "^3.0.0",
+    "buffer": "^6.0.3",
+    "crypto-browserify": "^3.12.0",
+    "path-browserify": "^1.0.1",
+    "assert": "^2.1.0",
+    "url": "^0.11.3",
+    "util": "^0.12.5",
+    "os-browserify": "^0.3.0"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test --watchAll=false"
+    "start": "craco start",
+    "build": "craco build",
+    "test": "craco test --watchAll=false"
+  },
+  "overrides": {
+    "typescript": "^4.9.5"
   },
   "browserslist": {
     "production": [">0.2%", "not dead", "not op_mini all"],

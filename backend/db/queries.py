@@ -1,14 +1,7 @@
 from sqlalchemy import extract
 from sqlalchemy.orm import Session
 from .models import HistoricalTrafficReading
-
-
-def _point_feature(lat: float, lng: float, props: dict) -> dict:
-    return {
-        "type": "Feature",
-        "geometry": {"type": "Point", "coordinates": [lng, lat]},
-        "properties": props,
-    }
+from ..utils.geojson_builder import build_point_feature
 
 
 def get_historical_traffic(
@@ -31,7 +24,7 @@ def get_historical_traffic(
     )
 
     return [
-        _point_feature(
+        build_point_feature(
             r.latitude or 0,
             r.longitude or 0,
             {

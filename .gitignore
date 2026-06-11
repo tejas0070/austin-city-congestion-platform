@@ -36,3 +36,22 @@ Thumbs.db
 # Node modules — frontend dependencies
 node_modules/
 frontend/node_modules/
+frontend/build/
+frontend/.env
+
+# Python egg / dist
+*.egg-info/
+dist/
+.venv/
+venv/
+
+# SQLite variants
+*.sqlite3
+dev.db
+
+# IDE
+.vscode/
+.idea/
+
+# Alembic pycache
+alembic/versions/__pycache__/

@@ -3,6 +3,7 @@ import sys
 from logging.config import fileConfig
 
 from alembic import context
+from dotenv import load_dotenv
 from sqlalchemy import pool, engine_from_config
 
 # ── path setup ────────────────────────────────────────────────────────────────
@@ -12,23 +13,15 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 # ── load .env before importing database module ────────────────────────────────
-from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, ".env"))
 
 # ── import Base and the live DATABASE_URL ─────────────────────────────────────
-from backend.app.database import Base, DATABASE_URL
+from backend.db.database import Base, DATABASE_URL  # noqa: E402
 
 # ── register every model with Base.metadata ───────────────────────────────────
-# Importing a module that defines SQLAlchemy models is enough — the class
-# bodies call Base's metaclass, which adds each table to Base.metadata.
-import backend.app.models      # noqa: F401  # pyright: ignore[reportUnusedImport]
-import backend.app.geo_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
-
-# ── GeoAlchemy2 autogenerate helpers ─────────────────────────────────────────
-# These ensure Geometry columns are rendered correctly in migration files
-# (e.g. Geometry("LINESTRING", srid=4326)) and that PostGIS-specific DDL
-# (AddGeometryColumn / DropGeometryColumn) is used where needed.
-from geoalchemy2 import alembic_helpers
+# Importing the models module is enough — the class bodies call Base's
+# metaclass, which adds each table to Base.metadata.
+import backend.db.models  # noqa: F401, E402
 
 # ── Alembic config ────────────────────────────────────────────────────────────
 config = context.config
@@ -57,10 +50,6 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        # GeoAlchemy2: render Geometry columns and PostGIS DDL correctly
-        process_revision_directives=alembic_helpers.writer,
-        render_item=alembic_helpers.render_item,
-        include_object=alembic_helpers.include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -81,10 +70,6 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            # GeoAlchemy2: render Geometry columns and PostGIS DDL correctly
-            process_revision_directives=alembic_helpers.writer,
-            render_item=alembic_helpers.render_item,
-            include_object=alembic_helpers.include_object,
         )
         with context.begin_transaction():
             context.run_migrations()

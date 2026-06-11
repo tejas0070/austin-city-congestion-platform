@@ -1,3 +1,4 @@
+import os
 import pytest
 from unittest.mock import patch, AsyncMock
 from backend.services.txdot_service import fetch_live_traffic, fetch_incidents
@@ -22,6 +23,7 @@ async def test_fetch_live_traffic_falls_back_to_simulated():
 
 @pytest.mark.asyncio
 async def test_fetch_incidents_returns_empty_on_error():
+    clear_cache()
     with patch("httpx.AsyncClient") as mock_client:
         mock_client.return_value.__aenter__.return_value.get = AsyncMock(
             side_effect=Exception("network error")
@@ -49,7 +51,6 @@ async def test_fetch_weather_falls_back_to_defaults():
 @pytest.mark.asyncio
 async def test_fetch_events_returns_hardcoded_when_no_api_key():
     clear_cache()
-    import os
     os.environ.pop("TICKETMASTER_API_KEY", None)
     result = await fetch_upcoming_events(days=365)
     assert isinstance(result, list)

@@ -8,8 +8,10 @@ from ..utils.geojson_builder import (
 )
 
 TXDOT_BASE_URL = "https://api.travelmapping.txdot.gov"
-LIVE_CACHE_TTL = 90   # seconds
+LIVE_CACHE_TTL = 90        # seconds
 LIVE_CACHE_KEY = "txdot_live"
+INCIDENTS_CACHE_TTL = 90   # seconds
+INCIDENTS_CACHE_KEY = "txdot_incidents"
 
 AUSTIN_CORRIDORS = [
     {"segment_id": "i35_downtown",     "road_name": "I-35 Downtown",          "lat": 30.2690, "lng": -97.7341},
@@ -81,7 +83,11 @@ def _transform_txdot_response(raw: dict) -> list[dict]:
 
 
 async def fetch_incidents() -> dict:
-    """Return active incidents GeoJSON FeatureCollection."""
+    """Return active incidents GeoJSON FeatureCollection, cached 90 s."""
+    cached = get_cache(INCIDENTS_CACHE_KEY)
+    if cached:
+        return cached
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
@@ -89,9 +95,12 @@ async def fetch_incidents() -> dict:
                 params={"bbox": "-97.9,30.1,-97.5,30.5"},
             )
             resp.raise_for_status()
-            return _transform_incidents(resp.json())
+            result = _transform_incidents(resp.json())
     except Exception:
-        return build_feature_collection([])
+        result = build_feature_collection([])
+
+    set_cache(INCIDENTS_CACHE_KEY, result, INCIDENTS_CACHE_TTL)
+    return result
 
 
 def _transform_incidents(raw: dict) -> dict:

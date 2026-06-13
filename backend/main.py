@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from .api.routes.traffic import router as traffic_router
 from .api.routes.events import router as events_router
 from .api.routes.weather import router as weather_router
@@ -14,9 +15,12 @@ app = FastAPI(
     version="2.0.0",
 )
 
+# GZip before CORS so compressed responses still carry the right headers
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
     allow_origin_regex=r"https://[a-z0-9\-]+\.netlify\.app",
     allow_credentials=False,
     allow_methods=["GET"],

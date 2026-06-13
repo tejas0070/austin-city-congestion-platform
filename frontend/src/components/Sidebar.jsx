@@ -1,10 +1,47 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import EventCard from './EventCard';
 import LayerToggle from './LayerToggle';
 import TrafficLegend from './TrafficLegend';
+import { formatClock, formatDayClock, formatEventDay } from '../utils/datetime';
 
-export default function Sidebar({ events, weather, layers, onLayerToggle }) {
+/**
+ * Group a date-sorted event list into ordered day buckets for an agenda view.
+ * @param {Array<{date?: string}>} events
+ * @returns {Array<{date: string, label: string, items: Array}>}
+ */
+function groupEventsByDay(events) {
+  const groups = [];
+  const indexByDate = new Map();
+  for (const ev of events) {
+    const date = ev.date ?? 'unknown';
+    if (!indexByDate.has(date)) {
+      indexByDate.set(date, groups.length);
+      groups.push({ date, label: formatEventDay(date), items: [] });
+    }
+    groups[indexByDate.get(date)].items.push(ev);
+  }
+  return groups;
+}
+
+export default function Sidebar({
+  events,
+  weather,
+  layers,
+  onLayerToggle,
+  liveUpdatedAt,
+  predictedFor,
+}) {
   const [activeTab, setActiveTab] = useState('layers');
+
+  const eventGroups = useMemo(() => groupEventsByDay(events), [events]);
+
+  // Small "as of / for" caption shown beneath the relevant layer toggle.
+  const liveCaption = formatClock(liveUpdatedAt);
+  const predictedCaption = formatDayClock(predictedFor);
+  const layerCaptions = {
+    live_traffic: liveCaption && `Live · as of ${liveCaption}`,
+    predicted: predictedCaption && `Predicted · for ${predictedCaption}`,
+  };
 
   return (
     <aside className="flex h-full w-80 flex-col bg-gray-900 border-r border-gray-800">
@@ -46,12 +83,18 @@ export default function Sidebar({ events, weather, layers, onLayerToggle }) {
         {activeTab === 'layers' && (
           <div className="space-y-2">
             {Object.entries(layers).map(([key, enabled]) => (
-              <LayerToggle
-                key={key}
-                label={key.replace(/_/g, ' ')}
-                enabled={enabled}
-                onToggle={() => onLayerToggle(key)}
-              />
+              <div key={key}>
+                <LayerToggle
+                  label={key.replace(/_/g, ' ')}
+                  enabled={enabled}
+                  onToggle={() => onLayerToggle(key)}
+                />
+                {layerCaptions[key] && (
+                  <p className="mt-0.5 px-1 text-[10px] text-gray-500">
+                    {layerCaptions[key]}
+                  </p>
+                )}
+              </div>
             ))}
             <div className="mt-4">
               <TrafficLegend />
@@ -59,11 +102,20 @@ export default function Sidebar({ events, weather, layers, onLayerToggle }) {
           </div>
         )}
         {activeTab === 'events' && (
-          <div className="space-y-2">
-            {events.length === 0 ? (
+          <div className="space-y-4">
+            {eventGroups.length === 0 ? (
               <p className="text-xs text-gray-500">No upcoming events.</p>
             ) : (
-              events.map((ev) => <EventCard key={ev.id ?? ev.name} event={ev} />)
+              eventGroups.map((group) => (
+                <div key={group.date} className="space-y-2">
+                  <p className="sticky top-0 -mx-1 bg-gray-900/95 px-1 py-1 text-xs font-semibold uppercase tracking-wide text-blue-400">
+                    {group.label}
+                  </p>
+                  {group.items.map((ev) => (
+                    <EventCard key={ev.id ?? ev.name} event={ev} />
+                  ))}
+                </div>
+              ))
             )}
           </div>
         )}

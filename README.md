@@ -4,12 +4,13 @@ Real-time Austin TX traffic visualized on an interactive kepler.gl map with even
 
 ## Stack
 
-| Layer    | Technology                                          |
-| -------- | --------------------------------------------------- |
-| Frontend | React 18, Redux, kepler.gl v3, Tailwind CSS, Axios  |
-| Backend  | FastAPI, SQLAlchemy 2.0, PostgreSQL, Alembic, httpx |
-| Data     | TxDOT, Open-Meteo, Ticketmaster, Austin 311         |
-| Build    | CRACO (CRA 5 + webpack polyfills)                   |
+| Layer    | Technology                                           |
+| -------- | ---------------------------------------------------- |
+| Frontend | React 18, Redux, kepler.gl v3, Tailwind CSS, Axios   |
+| Backend  | FastAPI, SQLAlchemy 2.0, PostgreSQL, Alembic, httpx  |
+| Map      | MapLibre GL JS + Carto Dark Matter (no token needed) |
+| Data     | TxDOT, Open-Meteo, Ticketmaster, Austin 311          |
+| Build    | CRACO (CRA 5 + webpack polyfills)                    |
 
 ## Quick Start
 
@@ -35,7 +36,7 @@ uvicorn backend.main:app --reload
 ```bash
 cd frontend
 npm install
-# copy .env.example values to frontend/.env and set REACT_APP_MAPBOX_TOKEN
+cp .env.example frontend/.env   # no Mapbox token needed
 npm start
 ```
 
@@ -45,30 +46,32 @@ App opens at <http://localhost:3000>, API at <http://localhost:8000>.
 
 **Backend (`.env` at project root):**
 
-| Variable                | Required | Description                     |
-| ----------------------- | -------- | ------------------------------- |
-| `DATABASE_URL`          | Yes      | PostgreSQL connection string    |
-| `TICKETMASTER_API_KEY`  | No       | Events (free tier)              |
-| `SOCRATA_APP_TOKEN`     | No       | Austin 311 rate limit token     |
+| Variable               | Required | Description                  |
+| ---------------------- | -------- | ---------------------------- |
+| `DATABASE_URL`         | Yes      | PostgreSQL connection string |
+| `TICKETMASTER_API_KEY` | No       | Events (free tier)           |
+| `SOCRATA_APP_TOKEN`    | No       | Austin 311 rate limit token  |
 
 **Frontend (`frontend/.env`):**
 
-| Variable                  | Required | Description                          |
-| ------------------------- | -------- | ------------------------------------ |
-| `REACT_APP_MAPBOX_TOKEN`  | Yes\*    | Mapbox token for kepler.gl basemap   |
-| `REACT_APP_API_BASE_URL`  | No       | Defaults to <http://localhost:8000>  |
+| Variable                 | Required | Description                         |
+| ------------------------ | -------- | ----------------------------------- |
+| `REACT_APP_API_BASE_URL` | No       | Defaults to <http://localhost:8000> |
 
-\*kepler.gl renders without a token but shows a blank basemap.
+> No Mapbox token required. The map uses MapLibre GL JS with the Carto Dark
+> Matter style, which is completely free with no API key.
 
 ## Features
 
-- Live traffic layer (TxDOT, refreshes every 2 min)
-- Historical traffic layer by time of day
+- Live traffic corridors color-coded green → yellow → red by congestion index
+- Baseline and predicted (+2 h) corridor layers
+- Live traffic speeds from TxDOT (refreshes every 2 min)
 - Incident markers
 - Venue pins with event details
 - Events calendar sidebar
 - Weather widget
 - Layer toggle controls
+- Map bounds locked to Austin metro area
 
 ## Data Sources
 

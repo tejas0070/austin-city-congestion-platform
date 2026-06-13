@@ -2,10 +2,11 @@ import os
 from datetime import datetime, timedelta, timezone
 import httpx
 from ..utils.cache import get_cache, set_cache
+from ..utils.geojson_builder import build_point_feature, build_feature_collection
 
 _UTC = timezone.utc
 
-CACHE_KEY = "events_upcoming"
+CACHE_KEY = "events_upcoming"  # combined with `days` per request
 CACHE_TTL = 3600  # 1 hour
 
 VENUE_COORDS = {
@@ -34,7 +35,8 @@ UT_FOOTBALL_SCHEDULE = [
 
 
 async def fetch_upcoming_events(days: int = 30) -> list[dict]:
-    cached = get_cache(CACHE_KEY)
+    cache_key = f"{CACHE_KEY}_{days}"
+    cached = get_cache(cache_key)
     if cached:
         return cached
 
@@ -44,8 +46,48 @@ async def fetch_upcoming_events(days: int = 30) -> list[dict]:
     events.extend(await _fetch_ticketmaster_events(days))
 
     events.sort(key=lambda e: e["date"])
-    set_cache(CACHE_KEY, events, CACHE_TTL)
+    set_cache(cache_key, events, CACHE_TTL)
     return events
+
+
+_DEFAULT_ATTENDANCE = 5000
+
+
+async def build_events_geojson(days: int = 30) -> dict:
+    """Return upcoming events as a GeoJSON FeatureCollection of venue points.
+
+    Each point carries expected_attendance (used to size the map circle) and
+    days_until (for time-based filtering in the UI).
+    """
+    events = await fetch_upcoming_events(days=days)
+    now = datetime.now(_UTC)
+
+    features: list[dict] = []
+    for ev in events:
+        lat, lng = ev.get("lat"), ev.get("lng")
+        if lat is None or lng is None:
+            continue
+
+        attendance = ev.get("expected_attendance") or _DEFAULT_ATTENDANCE
+        days_until = None
+        try:
+            event_date = datetime.strptime(ev["date"], "%Y-%m-%d").replace(tzinfo=_UTC)
+            days_until = (event_date - now).days
+        except Exception:
+            pass
+
+        features.append(build_point_feature(lat, lng, {
+            "id": ev.get("id", ""),
+            "name": ev.get("name", ""),
+            "venue": ev.get("venue", ""),
+            "date": ev.get("date", ""),
+            "time": ev.get("time", ""),
+            "category": ev.get("category", "Other"),
+            "expected_attendance": attendance,
+            "days_until": days_until,
+        }))
+
+    return build_feature_collection(features)
 
 
 def _get_hardcoded_events(

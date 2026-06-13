@@ -82,8 +82,36 @@ def _transform_txdot_response(raw: dict) -> list[dict]:
     return features
 
 
+_SIMULATED_INCIDENTS = [
+    {"lat": 30.2850, "lng": -97.7341, "incident_type": "accident",     "severity": 3, "description": "Multi-vehicle collision blocking right lane on I-35 NB"},
+    {"lat": 30.3050, "lng": -97.7930, "incident_type": "construction", "severity": 2, "description": "Lane closure for resurfacing near MoPac/360"},
+    {"lat": 30.3877, "lng": -97.7232, "incident_type": "hazard",       "severity": 1, "description": "Debris on shoulder, US-183 NB"},
+    {"lat": 30.2672, "lng": -97.7431, "incident_type": "closure",      "severity": 4, "description": "Full closure for event load-out, Congress Ave"},
+]
+
+
+def _simulated_incidents() -> dict:
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    features = [
+        build_point_feature(i["lat"], i["lng"], {
+            "incident_id": f"sim_{idx}",
+            "incident_type": i["incident_type"],
+            "description": i["description"],
+            "severity": i["severity"],
+            "start_time": now,
+        })
+        for idx, i in enumerate(_SIMULATED_INCIDENTS)
+    ]
+    return build_feature_collection(features)
+
+
 async def fetch_incidents() -> dict:
-    """Return active incidents GeoJSON FeatureCollection, cached 90 s."""
+    """Return active incidents GeoJSON FeatureCollection, cached 90 s.
+
+    Falls back to simulated incidents when the live TxDOT feed is unavailable so
+    the incidents map layer always has data to render.
+    """
     cached = get_cache(INCIDENTS_CACHE_KEY)
     if cached:
         return cached
@@ -96,8 +124,10 @@ async def fetch_incidents() -> dict:
             )
             resp.raise_for_status()
             result = _transform_incidents(resp.json())
+            if not result.get("features"):
+                result = _simulated_incidents()
     except Exception:
-        result = build_feature_collection([])
+        result = _simulated_incidents()
 
     set_cache(INCIDENTS_CACHE_KEY, result, INCIDENTS_CACHE_TTL)
     return result

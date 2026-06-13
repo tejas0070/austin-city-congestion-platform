@@ -22,7 +22,7 @@ async def test_fetch_live_traffic_falls_back_to_simulated():
 
 
 @pytest.mark.asyncio
-async def test_fetch_incidents_returns_empty_on_error():
+async def test_fetch_incidents_falls_back_to_simulated_on_error():
     clear_cache()
     with patch("httpx.AsyncClient") as mock_client:
         mock_client.return_value.__aenter__.return_value.get = AsyncMock(
@@ -30,8 +30,13 @@ async def test_fetch_incidents_returns_empty_on_error():
         )
         result = await fetch_incidents()
 
+    # The incidents layer always needs data to render, so a failed live feed
+    # falls back to simulated incidents rather than an empty collection.
     assert result["type"] == "FeatureCollection"
-    assert result["features"] == []
+    assert len(result["features"]) > 0
+    assert result["features"][0]["properties"]["incident_type"] in {
+        "accident", "construction", "hazard", "closure",
+    }
 
 
 @pytest.mark.asyncio

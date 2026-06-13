@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { fetchUpcomingEvents } from '../services/eventsService';
+import { fetchUpcomingEvents, fetchEventsGeojson } from '../services/eventsService';
 
 export function useEvents(days = 30) {
   const [events, setEvents] = useState([]);
+  const [eventsGeojson, setEventsGeojson] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -11,9 +12,13 @@ export function useEvents(days = 30) {
 
     async function load() {
       try {
-        const data = await fetchUpcomingEvents(days);
+        const [list, geojson] = await Promise.all([
+          fetchUpcomingEvents(days),
+          fetchEventsGeojson(days),
+        ]);
         if (!cancelled) {
-          setEvents(data);
+          setEvents(list);
+          setEventsGeojson(geojson);
           setError(null);
         }
       } catch (err) {
@@ -29,5 +34,5 @@ export function useEvents(days = 30) {
     return () => { cancelled = true; };
   }, [days]);
 
-  return { events, loading, error };
+  return { events, eventsGeojson, loading, error };
 }

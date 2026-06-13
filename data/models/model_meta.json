@@ -1,0 +1,35 @@
+{
+  "numeric_features": [
+    "hour",
+    "day_of_week",
+    "is_weekend",
+    "month",
+    "weather_code",
+    "temperature_f",
+    "precipitation_in",
+    "dist_downtown_km",
+    "nearby_event_attendance",
+    "base_pattern"
+  ],
+  "categorical_features": [
+    "road_class"
+  ],
+  "feature_order": [
+    "hour",
+    "day_of_week",
+    "is_weekend",
+    "month",
+    "weather_code",
+    "temperature_f",
+    "precipitation_in",
+    "dist_downtown_km",
+    "nearby_event_attendance",
+    "base_pattern",
+    "road_class"
+  ],
+  "target": "congestion_pct",
+  "model_type": "HistGradientBoostingRegressor",
+  "test_mae": 1.897,
+  "test_r2": 0.9344,
+  "training_rows": 604800
+}

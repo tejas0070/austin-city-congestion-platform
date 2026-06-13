@@ -6,17 +6,17 @@ import MapContainer from './components/MapContainer';
 import Sidebar from './components/Sidebar';
 import LoadingOverlay from './components/LoadingOverlay';
 
-const MAPBOX_TOKEN = process.env.REACT_APP_MAPBOX_TOKEN || '';
 
 const INITIAL_LAYERS = {
   live_traffic: true,
+  predicted: false,
+  events: true,
   incidents: true,
-  events: false,
 };
 
 export default function App() {
-  const { liveTraffic, incidents, loading: trafficLoading } = useTrafficData();
-  const { events } = useEvents();
+  const { liveTraffic, corridors, corridorsPredicted, incidents, loading: trafficLoading } = useTrafficData();
+  const { events, eventsGeojson } = useEvents();
   const { weather } = useWeather();
 
   const [layers, setLayers] = useState(INITIAL_LAYERS);
@@ -35,11 +35,16 @@ export default function App() {
         weather={weather}
         layers={layers}
         onLayerToggle={handleLayerToggle}
+        liveUpdatedAt={corridors?.generated_at}
+        predictedFor={corridorsPredicted?.predicted_for}
       />
       <MapContainer
         liveTraffic={liveTraffic}
+        corridors={corridors}
+        corridorsPredicted={corridorsPredicted}
+        eventsGeojson={eventsGeojson}
         incidents={incidents}
-        mapboxToken={MAPBOX_TOKEN}
+        layers={layers}
       />
     </div>
   );

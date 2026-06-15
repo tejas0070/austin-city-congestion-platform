@@ -30,6 +30,7 @@ export default function Sidebar({
   onLayerToggle,
   liveUpdatedAt,
   predictedFor,
+  onOpenCalendar,
 }) {
   const [activeTab, setActiveTab] = useState('layers');
 
@@ -103,6 +104,13 @@ export default function Sidebar({
         )}
         {activeTab === 'events' && (
           <div className="space-y-4">
+            <button
+              type="button"
+              onClick={onOpenCalendar}
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 py-2 text-xs font-semibold uppercase tracking-wide text-white transition-colors hover:bg-blue-500"
+            >
+              <span>🗓</span> Open calendar
+            </button>
             {eventGroups.length === 0 ? (
               <p className="text-xs text-gray-500">No upcoming events.</p>
             ) : (

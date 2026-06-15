@@ -148,6 +148,7 @@ pause/unmount/mode-exit.
 ### Files
 
 **New**
+
 - `frontend/src/components/EventCalendar.jsx` — month-grid overlay.
 - `frontend/src/components/TimeSliderPanel.jsx` — bottom panel (date, play/pause, slider,
   hour + weather label).
@@ -156,6 +157,7 @@ pause/unmount/mode-exit.
 - `frontend/src/utils/calendar.js` — pure month-grid math + events-by-day index.
 
 **Changed**
+
 - `frontend/src/App.js` — owns preview state; wires calendar ↔ slider ↔ map.
 - `frontend/src/components/MapContainer.jsx` — day-preview feeding of the Predicted layer.
 - `frontend/src/components/Sidebar.jsx` — "Calendar" button in the Events tab.

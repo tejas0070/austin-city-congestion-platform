@@ -27,3 +27,16 @@ export async function fetchPredicted(hoursAhead = 2, includeEvents = true) {
   });
   return data;
 }
+
+/**
+ * Fetch the whole-day predicted congestion for a date ("YYYY-MM-DD"): geometry
+ * once plus a per-hour congestion-index matrix.
+ * @param {string} date
+ * @param {boolean} includeEvents
+ */
+export async function fetchDayPrediction(date, includeEvents = true) {
+  const { data } = await api.get('/api/traffic/corridors/day', {
+    params: { date, include_events: includeEvents },
+  });
+  return data;
+}

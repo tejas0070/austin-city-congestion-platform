@@ -1,13 +1,23 @@
-from fastapi import APIRouter, Depends, Query
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from ..dependencies import get_db
 from ...db.queries import get_historical_traffic
 from ...services.txdot_service import fetch_live_traffic, fetch_incidents
 from ...services.segments_service import build_live_segments, segment_count
-from ...services.ml_model import predict_segments, get_model_meta, model_is_available
+from ...services.ml_model import (
+    predict_segments,
+    predict_day,
+    get_model_meta,
+    model_is_available,
+)
 from ...utils.geojson_builder import build_feature_collection
 
 router = APIRouter(prefix="/api/traffic", tags=["traffic"])
+
+# Day-preview is bounded to the events horizon.
+_MAX_PREVIEW_DAYS = 90
 
 
 @router.get("/live")
@@ -39,6 +49,30 @@ async def get_corridors_predicted(
 ):
     """ML-predicted city-wide congestion for a future time window."""
     return await predict_segments(hours_ahead=hours_ahead, include_events=include_events)
+
+
+@router.get("/corridors/day")
+async def get_corridors_day(
+    date: str = Query(..., description="Target local date, YYYY-MM-DD"),
+    include_events: bool = Query(True, description="Include event attendance as a feature"),
+):
+    """Whole-day ML congestion: 24 hourly snapshots as a compact per-hour matrix."""
+    try:
+        target = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be formatted YYYY-MM-DD")
+
+    days_ahead = (target - datetime.now().date()).days
+    if days_ahead < 0 or days_ahead > _MAX_PREVIEW_DAYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"date must be within today..+{_MAX_PREVIEW_DAYS} days",
+        )
+
+    if not model_is_available():
+        raise HTTPException(status_code=503, detail="Prediction model unavailable")
+
+    return await predict_day(target, include_events=include_events)
 
 
 @router.get("/model/info")

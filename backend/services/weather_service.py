@@ -1,3 +1,5 @@
+from datetime import date, datetime
+
 import httpx
 from ..utils.cache import get_cache, set_cache
 
@@ -6,6 +8,10 @@ AUSTIN_LAT = 30.2672
 AUSTIN_LNG = -97.7431
 CACHE_TTL = 900   # 15 minutes
 CACHE_KEY = "weather_current"
+
+# Open-Meteo serves at most 16 forecast days (today + 15).
+FORECAST_HORIZON_DAYS = 15
+AUSTIN_TZ = "America/Chicago"
 
 WEATHER_CODE_MAP: dict[int, str] = {
     0: "Clear",
@@ -58,4 +64,63 @@ async def fetch_current_weather() -> dict:
         }
 
     set_cache(CACHE_KEY, result, 30 if error else CACHE_TTL)
+    return result
+
+
+async def fetch_hourly_forecast(target_date: date) -> dict | None:
+    """Hourly Open-Meteo forecast for a local Austin date.
+
+    Returns ``{hour 0-23: {weather_code, temperature_f, precipitation_in, condition}}``
+    when ``target_date`` falls within the ~16-day forecast horizon, otherwise ``None``.
+    Cached 15 min. Returns ``None`` silently on error or out-of-horizon so callers can
+    fall back to the current-weather proxy.
+    """
+    days_ahead = (target_date - datetime.now().date()).days
+    if days_ahead < 0 or days_ahead > FORECAST_HORIZON_DAYS:
+        return None
+
+    cache_key = f"weather_hourly_{target_date.isoformat()}"
+    cached = get_cache(cache_key)
+    if cached:
+        return cached
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(OPEN_METEO_URL, params={
+                "latitude": AUSTIN_LAT,
+                "longitude": AUSTIN_LNG,
+                "hourly": "temperature_2m,precipitation,weather_code",
+                "temperature_unit": "fahrenheit",
+                "precipitation_unit": "inch",
+                "timezone": AUSTIN_TZ,
+                "forecast_days": 16,
+            })
+            resp.raise_for_status()
+            hourly = resp.json().get("hourly", {})
+    except Exception:
+        return None
+
+    times = hourly.get("time", [])
+    temps = hourly.get("temperature_2m", [])
+    precs = hourly.get("precipitation", [])
+    codes = hourly.get("weather_code", [])
+    target_str = target_date.isoformat()
+
+    result: dict[int, dict] = {}
+    for i, t in enumerate(times):
+        if not t.startswith(target_str):
+            continue
+        hour = int(t[11:13])
+        code = codes[i] if i < len(codes) else 0
+        result[hour] = {
+            "weather_code": code,
+            "temperature_f": temps[i] if i < len(temps) else None,
+            "precipitation_in": precs[i] if i < len(precs) else None,
+            "condition": WEATHER_CODE_MAP.get(code or 0, "Unknown"),
+        }
+
+    if not result:
+        return None
+
+    set_cache(cache_key, result, CACHE_TTL)
     return result

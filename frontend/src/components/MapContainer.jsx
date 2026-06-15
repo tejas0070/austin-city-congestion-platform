@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import KeplerGl from '@kepler.gl/components';
 import {
@@ -8,9 +8,12 @@ import {
   mapStyleChange,
   updateMap,
   layerConfigChange,
+  layerVisualChannelConfigChange,
+  removeDataset,
 } from '@kepler.gl/actions';
 import { processGeojson, processRowObject } from '@kepler.gl/processors';
 import { AUSTIN_VIEWPORT, MIN_ZOOM, AUSTIN_GEO_BOUNDS } from '../constants/austinBounds';
+import { buildDayFC, hourField } from '../utils/dayPrediction';
 
 const SIDEBAR_WIDTH_PX = 320;
 const MAP_ID = 'austin_traffic_map';
@@ -24,17 +27,29 @@ const CARTO_DARK = {
 };
 
 // Shared green / yellow / red ramp keyed on congestion_index (0/1/2).
+// customOrdinal + an explicit colorMap pins each index to a colour regardless
+// of the data's range. A plain `quantize` derives thresholds from each batch's
+// min/max, so a narrow batch (e.g. one hour that's mostly one level) collapses
+// the domain and paints everything the last colour (red) — which also makes
+// every animated hour look identical. The fixed map avoids both.
+const CONGESTION_COLORS = ['#00C864', '#FFC800', '#DC3232'];
 const CONGESTION_COLOR_RANGE = {
   name: 'Traffic Congestion',
-  type: 'custom',
+  type: 'customOrdinal',
   category: 'Custom',
-  colors: ['#00C864', '#FFC800', '#DC3232'],
+  colors: CONGESTION_COLORS,
+  colorMap: [
+    [0, '#00C864'],
+    [1, '#FFC800'],
+    [2, '#DC3232'],
+  ],
 };
 
 // Dataset ids (must match the datasets pushed in the load effect).
 const DATA = {
   live: 'corridors',
   predicted: 'corridors_predicted',
+  dayPreview: 'corridors_day',
   events: 'events',
   incidents: 'incidents',
 };
@@ -43,19 +58,12 @@ const DATA = {
 const LAYER = {
   live: 'corridors_live',
   predicted: 'corridors_pred',
+  dayPreview: 'corridors_day',
   events: 'events_circles',
   incidents: 'incidents_icons',
 };
 
-// App `layers` toggle key -> kepler layer id.
-const VISIBILITY_MAP = {
-  live_traffic: LAYER.live,
-  predicted: LAYER.predicted,
-  events: LAYER.events,
-  incidents: LAYER.incidents,
-};
-
-function corridorLineLayer(id, dataId, label, isVisible) {
+function corridorLineLayer(id, dataId, label, isVisible, field = 'congestion_index') {
   return {
     id,
     type: 'geojson',
@@ -69,10 +77,10 @@ function corridorLineLayer(id, dataId, label, isVisible) {
       // GeoJSON LineStrings are drawn with their STROKE, not their fill —
       // binding only colorField leaves every segment one solid colour. The
       // stroke color field is what actually drives the green/yellow/red ramp.
-      strokeColorField: { name: 'congestion_index', type: 'integer' },
-      strokeColorScale: 'quantize',
-      colorField: { name: 'congestion_index', type: 'integer' },
-      colorScale: 'quantize',
+      strokeColorField: { name: field, type: 'integer' },
+      strokeColorScale: 'customOrdinal',
+      colorField: { name: field, type: 'integer' },
+      colorScale: 'customOrdinal',
       visConfig: {
         thickness: 3,
         opacity: 0.9,
@@ -153,9 +161,26 @@ export default function MapContainer({
   eventsGeojson,
   incidents,
   layers,
+  previewDate,
+  previewHour,
+  daySegments,
+  daySeries,
 }) {
   const dispatch = useDispatch();
   const initializedRef = useRef(false);
+  // Whether the styled +2h Predicted layer has been created yet. That feed
+  // arrives after the live feed, so it often misses the initial addDataToMap.
+  const predictedCreatedRef = useRef(false);
+  // Which date's data is currently loaded as the day-preview dataset.
+  const loadedPreviewDateRef = useRef(null);
+
+  // The whole selected day as one FeatureCollection with a congestion column per
+  // hour (cg_0..cg_23). Loaded once; scrubbing only swaps the layer's color field
+  // (kepler can't update RowDataContainer rows in place, so we never replace data).
+  const dayFC = useMemo(() => {
+    if (!previewDate) return null;
+    return buildDayFC(daySegments, daySeries);
+  }, [previewDate, daySegments, daySeries]);
 
   const keplerMapState = useSelector((state) => state.keplerGl?.[MAP_ID]?.mapState);
   const keplerLayers = useSelector((state) => state.keplerGl?.[MAP_ID]?.visState?.layers);
@@ -197,7 +222,8 @@ export default function MapContainer({
     datasets.push({ info: { id: DATA.live, label: 'Live Traffic' }, data: processGeojson(corridors) });
     initialLayers.push(corridorLineLayer(LAYER.live, DATA.live, 'Live Traffic', true));
 
-    if (corridorsPredicted?.features?.length > 0) {
+    const hasPredicted = corridorsPredicted?.features?.length > 0;
+    if (hasPredicted) {
       datasets.push({ info: { id: DATA.predicted, label: 'Predicted +2h (ML)' }, data: processGeojson(corridorsPredicted) });
       initialLayers.push(corridorLineLayer(LAYER.predicted, DATA.predicted, 'Predicted +2h (ML)', false));
     }
@@ -233,21 +259,99 @@ export default function MapContainer({
       // ignores the config mapState on cold start).
       dispatch(updateMap(AUSTIN_VIEWPORT));
       initializedRef.current = true;
+      predictedCreatedRef.current = hasPredicted;
     } else {
-      dispatch(updateVisData({ datasets, options: { centerMap: false } }));
+      // The Predicted dataset is owned by the dedicated effect below so a poll
+      // refresh never clobbers an active day-preview hour.
+      const pollDatasets = datasets.filter((d) => d.info.id !== DATA.predicted);
+      dispatch(updateVisData({ datasets: pollDatasets, options: { centerMap: false } }));
     }
   }, [liveTraffic, corridors, corridorsPredicted, eventsGeojson, incidents, dispatch]);
 
-  // Sync kepler layer visibility to the sidebar toggle state.
+  // Create the styled +2h Predicted layer once its data is available (it usually
+  // arrives after the initial addDataToMap). Row data can't be updated in place,
+  // so this is create-once; the +2h snapshot is fixed for the session.
+  useEffect(() => {
+    if (!initializedRef.current || predictedCreatedRef.current) return;
+    if (!corridorsPredicted?.features?.length) return;
+    dispatch(addDataToMap({
+      datasets: [{
+        info: { id: DATA.predicted, label: 'Predicted +2h (ML)' },
+        data: processGeojson(corridorsPredicted),
+      }],
+      options: { centerMap: false, readOnly: true, autoCreateLayers: false },
+      config: {
+        visState: { layers: [corridorLineLayer(LAYER.predicted, DATA.predicted, 'Predicted +2h (ML)', false)] },
+      },
+    }));
+    predictedCreatedRef.current = true;
+  }, [corridorsPredicted, dispatch]);
+
+  // Load (or swap) the day-preview dataset when a day is selected. The dataset
+  // carries all 24 hours as columns; selecting a new day re-loads it (row data
+  // can't be replaced in place). Exiting preview removes it.
+  useEffect(() => {
+    if (!initializedRef.current) return;
+
+    if (!previewDate) {
+      if (loadedPreviewDateRef.current !== null) {
+        dispatch(removeDataset(DATA.dayPreview));
+        loadedPreviewDateRef.current = null;
+      }
+      return;
+    }
+
+    if (!dayFC?.features?.length || loadedPreviewDateRef.current === previewDate) return;
+
+    if (loadedPreviewDateRef.current !== null) {
+      dispatch(removeDataset(DATA.dayPreview));
+    }
+    dispatch(addDataToMap({
+      datasets: [{ info: { id: DATA.dayPreview, label: 'Day Preview' }, data: processGeojson(dayFC) }],
+      options: { centerMap: false, readOnly: true, autoCreateLayers: false },
+      config: {
+        visState: {
+          layers: [corridorLineLayer(LAYER.dayPreview, DATA.dayPreview, 'Day Preview', true, hourField(previewHour))],
+        },
+      },
+    }));
+    loadedPreviewDateRef.current = previewDate;
+  }, [previewDate, dayFC, previewHour, dispatch]);
+
+  // Scrub hours by swapping the day-preview layer's stroke color field — no data
+  // replacement, so playback/scrubbing stays smooth and reliable.
+  useEffect(() => {
+    if (!previewDate || loadedPreviewDateRef.current !== previewDate) return;
+    const layer = keplerLayers?.find((l) => l.id === LAYER.dayPreview);
+    if (!layer) return;
+    const field = hourField(previewHour);
+    if (layer.config?.strokeColorField?.name === field) return;
+    dispatch(layerVisualChannelConfigChange(
+      layer,
+      { strokeColorField: { name: field, type: 'integer' } },
+      'strokeColor',
+    ));
+  }, [previewHour, previewDate, keplerLayers, dispatch]);
+
+  // Sync kepler layer visibility to the sidebar toggles, accounting for preview
+  // mode: the day-preview layer stands in for the +2h Predicted layer while a
+  // day is being explored.
   useEffect(() => {
     if (!keplerLayers || !layers) return;
-    for (const [key, layerId] of Object.entries(VISIBILITY_MAP)) {
-      const layer = keplerLayers.find((l) => l.id === layerId);
-      if (layer && layer.config.isVisible !== layers[key]) {
-        dispatch(layerConfigChange(layer, { isVisible: layers[key] }));
+    const inPreview = !!previewDate;
+    const desired = {
+      [LAYER.live]: layers.live_traffic,
+      [LAYER.predicted]: layers.predicted && !inPreview,
+      [LAYER.dayPreview]: layers.predicted && inPreview,
+      [LAYER.events]: layers.events,
+      [LAYER.incidents]: layers.incidents,
+    };
+    for (const layer of keplerLayers) {
+      if (layer.id in desired && layer.config.isVisible !== desired[layer.id]) {
+        dispatch(layerConfigChange(layer, { isVisible: desired[layer.id] }));
       }
     }
-  }, [layers, keplerLayers, dispatch]);
+  }, [layers, keplerLayers, previewDate, dispatch]);
 
   return (
     <div className="relative flex-1 h-full">

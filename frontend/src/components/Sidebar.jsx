@@ -31,6 +31,8 @@ export default function Sidebar({
   liveUpdatedAt,
   predictedFor,
   onOpenCalendar,
+  confidenceAvg,
+  confidenceLabel,
 }) {
   const [activeTab, setActiveTab] = useState('layers');
 
@@ -98,7 +100,7 @@ export default function Sidebar({
               </div>
             ))}
             <div className="mt-4">
-              <TrafficLegend />
+              <TrafficLegend confidenceAvg={confidenceAvg} confidenceLabel={confidenceLabel} />
             </div>
           </div>
         )}

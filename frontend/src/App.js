@@ -95,6 +95,8 @@ export default function App() {
         liveUpdatedAt={corridors?.generated_at}
         predictedFor={previewDate ? null : corridorsPredicted?.predicted_for}
         onOpenCalendar={() => setCalendarOpen(true)}
+        confidenceAvg={!previewDate && layers.predicted ? corridorsPredicted?.confidence_avg : undefined}
+        confidenceLabel={!previewDate && layers.predicted ? corridorsPredicted?.confidence_label : undefined}
       />
       <MapContainer
         liveTraffic={liveTraffic}

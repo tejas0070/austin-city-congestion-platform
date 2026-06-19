@@ -29,7 +29,17 @@
   ],
   "target": "congestion_pct",
   "model_type": "HistGradientBoostingRegressor",
-  "test_mae": 1.897,
-  "test_r2": 0.9344,
-  "training_rows": 604800
+  "test_mae": 11.027,
+  "test_r2": 0.2061,
+  "training_rows": 120000,
+  "interval": {
+    "lower_quantile": 0.1,
+    "upper_quantile": 0.9,
+    "nominal_coverage": 0.8
+  },
+  "empirical_coverage": 0.9022,
+  "width_anchors": {
+    "p5": 24.006,
+    "p95": 51.472
+  }
 }

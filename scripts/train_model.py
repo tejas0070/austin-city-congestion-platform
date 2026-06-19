@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -85,6 +86,42 @@ def main() -> int:
     print(f"  MAE: {mae:.2f} congestion-percent points")
     print(f"  R^2: {r2:.4f}")
 
+    # --- Quantile models for an 80% prediction interval -------------------
+    QUANTILES_PATH = Path(__file__).resolve().parents[1] / "data" / "models" / "congestion_quantiles.pkl"
+    CARD_PATH = Path(__file__).resolve().parents[1] / "docs" / "model_card.md"
+
+    def _make_quantile_model(q: float) -> Pipeline:
+        return Pipeline(steps=[
+            ("prep", ColumnTransformer(
+                transformers=[("road_class", OneHotEncoder(handle_unknown="ignore"), CATEGORICAL_FEATURES)],
+                remainder="passthrough",
+            )),
+            ("gb", HistGradientBoostingRegressor(
+                loss="quantile", quantile=q,
+                max_iter=400, learning_rate=0.06, max_depth=6,
+                l2_regularization=1.0, random_state=RANDOM_STATE,
+            )),
+        ])
+
+    print("Training quantile models (q10, q90) ...")
+    q10_model = _make_quantile_model(0.10).fit(x_train, y_train)
+    q90_model = _make_quantile_model(0.90).fit(x_train, y_train)
+
+    low = q10_model.predict(x_test)
+    high = q90_model.predict(x_test)
+    import numpy as np
+    lo = np.minimum(low, high)
+    hi = np.maximum(low, high)
+    widths = np.clip(hi, 0, 100) - np.clip(lo, 0, 100)
+    coverage = float(((y_test >= lo) & (y_test <= hi)).mean())
+    w_low = float(np.percentile(widths, 5))
+    w_high = float(np.percentile(widths, 95))
+    print(f"  Interval coverage (target ~0.80): {coverage:.3f}")
+    print(f"  Width anchors (p5/p95): {w_low:.2f} / {w_high:.2f}")
+
+    joblib.dump({"q10": q10_model, "q90": q90_model}, QUANTILES_PATH)
+    print(f"Saved quantile models to {QUANTILES_PATH}")
+
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
     META_PATH.write_text(json.dumps({
@@ -96,7 +133,26 @@ def main() -> int:
         "test_mae": round(float(mae), 3),
         "test_r2": round(float(r2), 4),
         "training_rows": int(len(df)),
+        "interval": {"lower_quantile": 0.10, "upper_quantile": 0.90, "nominal_coverage": 0.80},
+        "empirical_coverage": round(coverage, 4),
+        "width_anchors": {"p5": round(w_low, 3), "p95": round(w_high, 3)},
     }, indent=2), encoding="utf-8")
+
+    CARD_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CARD_PATH.write_text(
+        f"""# Congestion Model Card
+
+- **Model:** HistGradientBoostingRegressor (point) + q10/q90 quantile models (80% interval)
+- **Training rows:** {len(df):,}
+- **Data source:** City of Austin Bluetooth travel sensors (real speed history)
+- **Point accuracy:** MAE {mae:.2f} congestion-pts, R squared {r2:.4f}
+- **Interval calibration:** empirical coverage {coverage:.3f} (nominal 0.80)
+- **Confidence:** interval width mapped to 0-100 via p5/p95 width anchors ({w_low:.1f} / {w_high:.1f})
+- **Generated:** {datetime.now().isoformat(timespec='minutes')}
+""",
+        encoding="utf-8",
+    )
+    print(f"Saved model card to {CARD_PATH}")
 
     print(f"\nSaved model to {MODEL_PATH}")
     print(f"Saved metadata to {META_PATH}")

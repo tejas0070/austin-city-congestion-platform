@@ -124,3 +124,45 @@ async def fetch_hourly_forecast(target_date: date) -> dict | None:
 
     set_cache(cache_key, result, CACHE_TTL)
     return result
+
+
+ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+
+
+def fetch_historical_weather(start_date: str, end_date: str) -> dict[str, dict]:
+    """Hourly Open-Meteo ARCHIVE weather for a past date range (offline/ETL use).
+
+    Returns ``{ "YYYY-MM-DDTHH": {weather_code, temperature_f, precipitation_in} }``.
+    Synchronous (httpx.Client) because the ETL script is synchronous. Returns {}
+    on error so the caller can fall back to a neutral profile.
+    """
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.get(ARCHIVE_URL, params={
+                "latitude": AUSTIN_LAT,
+                "longitude": AUSTIN_LNG,
+                "start_date": start_date,
+                "end_date": end_date,
+                "hourly": "temperature_2m,precipitation,weather_code",
+                "temperature_unit": "fahrenheit",
+                "precipitation_unit": "inch",
+                "timezone": AUSTIN_TZ,
+            })
+            resp.raise_for_status()
+            hourly = resp.json().get("hourly", {})
+    except Exception:
+        return {}
+
+    times = hourly.get("time", [])
+    temps = hourly.get("temperature_2m", [])
+    precs = hourly.get("precipitation", [])
+    codes = hourly.get("weather_code", [])
+    out: dict[str, dict] = {}
+    for i, t in enumerate(times):
+        key = t[:13]  # "YYYY-MM-DDTHH"
+        out[key] = {
+            "weather_code": codes[i] if i < len(codes) else 0,
+            "temperature_f": temps[i] if i < len(temps) else 78.0,
+            "precipitation_in": precs[i] if i < len(precs) else 0.0,
+        }
+    return out

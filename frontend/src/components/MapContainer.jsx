@@ -46,6 +46,16 @@ const CONGESTION_COLOR_RANGE = {
   ],
 };
 
+// Fields shown when hovering a Predicted +2h segment.
+const PREDICTED_TOOLTIP_FIELDS = [
+  { name: 'road_name' },
+  { name: 'congestion_pct' },
+  { name: 'congestion_low' },
+  { name: 'congestion_high' },
+  { name: 'confidence_pct' },
+  { name: 'confidence_label' },
+];
+
 // Dataset ids (must match the datasets pushed in the load effect).
 const DATA = {
   live: 'corridors',
@@ -297,6 +307,12 @@ export default function MapContainer({
           config: {
             mapState: AUSTIN_VIEWPORT,
             visState: { layers: initialLayers },
+            interactionConfig: {
+              tooltip: {
+                fieldsToShow: { [DATA.predicted]: PREDICTED_TOOLTIP_FIELDS },
+                enabled: true,
+              },
+            },
           },
         })
       );
@@ -330,6 +346,12 @@ export default function MapContainer({
       options: { centerMap: false, readOnly: true, autoCreateLayers: false, keepExistingConfig: true },
       config: {
         visState: { layers: [corridorLineLayer(LAYER.predicted, DATA.predicted, 'Predicted +2h (ML)', false)] },
+        interactionConfig: {
+          tooltip: {
+            fieldsToShow: { [DATA.predicted]: PREDICTED_TOOLTIP_FIELDS },
+            enabled: true,
+          },
+        },
       },
     }));
     predictedCreatedRef.current = true;

@@ -28,7 +28,8 @@ only** (the 24-hour day-prediction surface is out of scope for this cut).
 - Confidence on the day-prediction (24h matrix) surface — later.
 - Recurring/scheduled retraining — one-time historical pull for now.
 - Visual encoding of confidence on the map (opacity/dashes) — tooltip + legend only.
-- Reconstructing historical event attendance (not reliably available; see limitations).
+- Reconstructing the *long tail* of small historical events — only major/mid-size events
+  are backfilled (see Section A.6); small live events are still handled at prediction time.
 
 ## Architecture Principle: offline-train / online-serve
 
@@ -53,8 +54,18 @@ New script `scripts/build_real_training_data.py`, run manually:
    to attach `road_class` and `dist_downtown_km`.
 4. **Join historical weather** from Open-Meteo's free historical archive API (no key), keyed
    on each reading's date/hour. Time features (hour, dow, weekend, month) derive from the timestamp.
-5. **Events:** keep the `nearby_event_attendance` feature but default it to `0` for historical
-   rows (reliable historical attendance is unavailable). Documented limitation.
+5. **Events (curated historical backfill):** build `data/events/austin_major_events.csv`
+   (date, venue lat/lng, attendance) covering the last 12–24 months of significant Austin
+   events across a **spread of attendance sizes** — not just the biggest — so the continuous
+   `nearby_event_attendance` feature gets resolution across its full range:
+   - ~100k UT football (DKR), ~75k ACL / F1 (COTA), ~20k Q2 Stadium (Austin FC),
+     ~15k Moody Center, ~5k Moody Amphitheater / smaller venues.
+   The ETL joins these the same distance/time-weighted way the live predictor does. Rows with
+   no nearby curated event get `0`. Because the feature is continuous and trained across a range
+   of sizes, the model learns a **smooth attendance→traffic curve** and **interpolates to small
+   future events automatically** — at live time the existing Ticketmaster feed supplies real
+   attendance for upcoming events of any size, and a small event yields a proportionally small
+   predicted impact. No special-casing of small events is required.
 6. **Output** `data/training/congestion_history.csv` with the **identical column contract** used
    today, so `train_model.py` consumes it with no feature-code changes.
 
@@ -109,13 +120,16 @@ and confidence fields are omitted — never an error. Existing 90s cache retaine
   quantile-crossing guard; congestion-target derivation from speed.
 - **Contract:** `/predicted` includes new per-feature + roll-up fields; fallback test (quantile models
   absent ⇒ valid response without confidence fields).
-- **ETL:** fixture of fake sensor rows ⇒ correct `congestion_history.csv` shape/column contract.
+- **ETL:** fixture of fake sensor rows ⇒ correct `congestion_history.csv` shape/column contract;
+  event-join test — a reading near a curated event's time/venue gets non-zero `nearby_event_attendance`,
+  one far away gets `0`.
 - 80%+ coverage on new code. (Empirical interval coverage is a model metric from `train_model.py`,
   distinct from test coverage.)
 
 ## Files touched
 
-- New: `scripts/build_real_training_data.py`, `docs/model_card.md` (generated).
+- New: `scripts/build_real_training_data.py`, `data/events/austin_major_events.csv` (curated),
+  `docs/model_card.md` (generated).
 - Modified: `scripts/train_model.py`, `backend/services/ml_model.py`,
   `backend/services/congestion_features.py`, `frontend/src/components/MapContainer.jsx`,
   `frontend/src/components/TrafficLegend.*`.
@@ -126,5 +140,9 @@ and confidence fields are omitted — never an error. Existing 90s cache retaine
 
 - Sensors are point locations, not full network coverage; the model generalizes via
   segment-agnostic features. Per-segment confidence spread reflects real predictability.
-- Historical event attendance defaulted to 0 (feature still active for live prediction).
+- Only major/mid-size historical events are backfilled (curated CSV). The long tail of small
+  historical events is treated as 0; small *future* events are still handled live via interpolation
+  along the continuous attendance feature.
+- Curated event attendance figures are approximate (published/estimated), which is acceptable for
+  learning the attendance→traffic curve.
 - Exact Socrata dataset id/schema and the speed-vs-volume target path confirmed in planning.

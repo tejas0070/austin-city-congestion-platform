@@ -145,4 +145,11 @@ and confidence fields are omitted — never an error. Existing 90s cache retaine
   along the continuous attendance feature.
 - Curated event attendance figures are approximate (published/estimated), which is acceptable for
   learning the attendance→traffic curve.
-- Exact Socrata dataset id/schema and the speed-vs-volume target path confirmed in planning.
+- **Datasets verified in planning:** speed = Austin Socrata TMSR `v7zg-5jg9` (`average_speed_mph`,
+  `timestamp`, reader/roadway names, **no coordinates**); locations = Travel Sensors `6yd9-yz29`
+  (`reader_id`, `primary_st`/`cross_st`, `location` Point). Readings geolocate via a reader→location
+  join, then map to the nearest OSM segment for `road_class`.
+- **Training window is ≈2013–2021** (the speed feed's real span), not "last 12–24 months." This is
+  fine for learning recurring hour/weather/event patterns; curated events + historical weather align
+  to each reading's own timestamp. The **live** prediction path still uses current weather + live events.
+- Historical weather via Open-Meteo **archive** API (`archive-api.open-meteo.com/v1/archive`, free, no key).

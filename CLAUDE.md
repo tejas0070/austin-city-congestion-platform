@@ -96,6 +96,7 @@ box. Only re-run the pipeline below if you change features or want fresh data.
 | Start frontend | `cd frontend && npm start` |
 | Fetch Austin road network (once) | `python scripts/fetch_austin_network.py` |
 | Generate ML training data | `python scripts/generate_training_data.py` |
+| Build REAL training data (Austin sensors) | `python scripts/build_real_training_data.py` |
 | Train congestion model | `python scripts/train_model.py` |
 | Run DB migrations | `alembic upgrade head` |
 | Run Python tests | `pytest --ignore=tests/test_time_steps.py` |
@@ -125,15 +126,24 @@ Loaded in `frontend/src/components/MapContainer.jsx`, toggled from the sidebar:
   source of truth used by both the data generator and the live predictor.
 - **Current training data is synthetic** (`scripts/generate_training_data.py`),
   shaped like Austin's rush-hour curves. See "Swapping in real data" below.
+- **Confidence:** q10/q90 quantile models give an 80% prediction interval per
+  segment; interval width maps to a 0-100 confidence score (calibrated to
+  held-out interval-width percentiles). Empirical coverage is reported in
+  `data/models/model_meta.json` and `docs/model_card.md`. Per-segment interval +
+  confidence appear in the Predicted +2h tooltip; the average confidence shows in
+  the legend.
 
 ### Swapping in real data
 
 The GeoJSON contract never changes, so real data drops in without touching the
 frontend:
 
-1. **Real congestion history** → produce a CSV at
-   `data/training/congestion_history.csv` with the same feature + `congestion_pct`
-   columns, then re-run `python scripts/train_model.py`. No code changes.
+1. **Real congestion history** → `scripts/build_real_training_data.py` (the
+   implemented real-data ETL) pulls City-of-Austin Bluetooth travel-sensor speed
+   history (datasets `v7zg-5jg9` + `6yd9-yz29`), derives congestion from speed,
+   joins historical weather + curated events, and writes
+   `data/training/congestion_history.csv`. Then run `python scripts/train_model.py`.
+   No code changes.
 2. **Real live feed** → replace `build_live_segments()` in
    `backend/services/segments_service.py` with the real per-segment source keyed
    on `segment_id`. The `/api/traffic/corridors` response shape stays identical.

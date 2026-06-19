@@ -13,6 +13,7 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
+from ..etl.confidence import clamp_interval, confidence_label, width_to_confidence
 from ..utils.cache import get_cache, set_cache
 from ..utils.geojson_builder import build_feature_collection, build_line_feature
 from .congestion_features import (
@@ -25,6 +26,7 @@ from .segments_service import load_segments
 
 MODEL_PATH = Path(__file__).resolve().parents[2] / "data" / "models" / "congestion_model.pkl"
 META_PATH = Path(__file__).resolve().parents[2] / "data" / "models" / "model_meta.json"
+QUANTILES_PATH = Path(__file__).resolve().parents[2] / "data" / "models" / "congestion_quantiles.pkl"
 
 _PREDICTION_CACHE_TTL = 90  # seconds
 _DAY_CACHE_TTL = 900  # 15 min — long enough to amortize 24 predictions, short
@@ -32,6 +34,7 @@ _DAY_CACHE_TTL = 900  # 15 min — long enough to amortize 24 predictions, short
 _DEFAULT_ATTENDANCE = 5000  # for events with no reported attendance
 
 _model = None  # lazy-loaded singleton
+_quantiles = None  # lazy-loaded {"q10": pipe, "q90": pipe}
 
 
 def model_is_available() -> bool:
@@ -53,6 +56,22 @@ def get_model_meta() -> dict:
     if META_PATH.exists():
         return json.loads(META_PATH.read_text(encoding="utf-8"))
     return {}
+
+
+def quantiles_are_available() -> bool:
+    return QUANTILES_PATH.exists()
+
+
+def _load_quantiles():
+    global _quantiles
+    if _quantiles is None and QUANTILES_PATH.exists():
+        _quantiles = joblib.load(QUANTILES_PATH)
+    return _quantiles
+
+
+def _width_anchors() -> tuple[float, float]:
+    meta = get_model_meta().get("width_anchors", {})
+    return float(meta.get("p5", 5.0)), float(meta.get("p95", 40.0))
 
 
 def _parse_events(raw_events: list[dict]) -> list[dict]:
@@ -149,11 +168,22 @@ async def predict_for_datetime(
 
     segments, rows, predictions = _run_predictions(target_dt, code, temp_f, precip_in, events)
 
+    quants = None
+    if quantiles_are_available():
+        quants = _load_quantiles()
+    low_preds = high_preds = None
+    if quants is not None and segments:
+        frame = pd.DataFrame(rows)[FEATURE_ORDER]
+        low_preds = quants["q10"].predict(frame)
+        high_preds = quants["q90"].predict(frame)
+    w_low, w_high = _width_anchors()
+
+    confidences: list[float] = []
     features: list[dict] = []
-    for seg, row, pct in zip(segments, rows, predictions):
+    for i, (seg, row, pct) in enumerate(zip(segments, rows, predictions)):
         pct = float(max(0.0, min(100.0, pct)))
         level, index = congestion_level(pct)
-        features.append(build_line_feature(seg["coords"], {
+        props = {
             "segment_id": seg["segment_id"],
             "road_name": seg["name"],
             "road_class": seg["road_class"],
@@ -162,11 +192,26 @@ async def predict_for_datetime(
             "congestion_index": index,
             "nearby_event_attendance": row["nearby_event_attendance"],
             "predicted_for": target_dt.isoformat(timespec="minutes"),
-        }))
+        }
+        if low_preds is not None:
+            lo, hi = clamp_interval(float(low_preds[i]), float(high_preds[i]))
+            conf = width_to_confidence(hi - lo, w_low, w_high)
+            confidences.append(conf)
+            props.update({
+                "congestion_low": round(lo, 1),
+                "congestion_high": round(hi, 1),
+                "confidence_pct": conf,
+                "confidence_label": confidence_label(conf),
+            })
+        features.append(build_line_feature(seg["coords"], props))
 
     result = build_feature_collection(features)
     result["generated_at"] = datetime.now().isoformat(timespec="seconds")
     result["predicted_for"] = target_dt.isoformat(timespec="minutes")
+    if confidences:
+        avg = round(sum(confidences) / len(confidences), 1)
+        result["confidence_avg"] = avg
+        result["confidence_label"] = confidence_label(avg)
     return result
 
 

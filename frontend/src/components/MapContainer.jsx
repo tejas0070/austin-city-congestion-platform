@@ -46,7 +46,7 @@ const CONGESTION_COLOR_RANGE = {
   ],
 };
 
-// Fields shown when hovering a Predicted +2h segment.
+// Fields shown when hovering a Predicted +2h segment (interval + confidence).
 const PREDICTED_TOOLTIP_FIELDS = [
   { name: 'road_name' },
   { name: 'congestion_pct' },
@@ -54,6 +54,15 @@ const PREDICTED_TOOLTIP_FIELDS = [
   { name: 'congestion_high' },
   { name: 'confidence_pct' },
   { name: 'confidence_label' },
+];
+
+// Fields shown when hovering a Live Traffic segment. Explicitly set (rather than
+// letting kepler auto-populate every property) so internal columns like
+// segment_id / road_class never leak into the tooltip.
+const LIVE_TOOLTIP_FIELDS = [
+  { name: 'road_name' },
+  { name: 'congestion_pct' },
+  { name: 'congestion_level' },
 ];
 
 // Dataset ids (must match the datasets pushed in the load effect).
@@ -72,6 +81,19 @@ const LAYER = {
   dayPreview: 'corridors_day',
   events: 'events_circles',
   incidents: 'incidents_icons',
+};
+
+// Hover-tooltip config applied wherever corridor datasets are added. Setting both
+// datasets explicitly keeps segment_id/road_class out and ensures the predicted
+// layer surfaces its interval + confidence fields.
+const CORRIDOR_TOOLTIP_INTERACTION = {
+  tooltip: {
+    fieldsToShow: {
+      [DATA.live]: LIVE_TOOLTIP_FIELDS,
+      [DATA.predicted]: PREDICTED_TOOLTIP_FIELDS,
+    },
+    enabled: true,
+  },
 };
 
 function corridorLineLayer(id, dataId, label, isVisible, field = 'congestion_index') {
@@ -307,12 +329,7 @@ export default function MapContainer({
           config: {
             mapState: AUSTIN_VIEWPORT,
             visState: { layers: initialLayers },
-            interactionConfig: {
-              tooltip: {
-                fieldsToShow: { [DATA.predicted]: PREDICTED_TOOLTIP_FIELDS },
-                enabled: true,
-              },
-            },
+            interactionConfig: CORRIDOR_TOOLTIP_INTERACTION,
           },
         })
       );
@@ -346,12 +363,7 @@ export default function MapContainer({
       options: { centerMap: false, readOnly: true, autoCreateLayers: false, keepExistingConfig: true },
       config: {
         visState: { layers: [corridorLineLayer(LAYER.predicted, DATA.predicted, 'Predicted +2h (ML)', false)] },
-        interactionConfig: {
-          tooltip: {
-            fieldsToShow: { [DATA.predicted]: PREDICTED_TOOLTIP_FIELDS },
-            enabled: true,
-          },
-        },
+        interactionConfig: CORRIDOR_TOOLTIP_INTERACTION,
       },
     }));
     predictedCreatedRef.current = true;
@@ -433,8 +445,13 @@ export default function MapContainer({
   useEffect(() => {
     if (!keplerLayers || !layers) return;
     const inPreview = !!previewDate;
+    // Live and Predicted share identical geometry, so showing both stacks two
+    // layers on the same roads and the top one (Live) captures every hover —
+    // hiding the predicted interval/confidence tooltip. When Predicted is the
+    // active forecast view, suppress Live so its segments are the ones hovered.
+    const predictedActive = layers.predicted && !inPreview;
     const desired = {
-      [LAYER.live]: layers.live_traffic,
+      [LAYER.live]: layers.live_traffic && !predictedActive,
       [LAYER.predicted]: layers.predicted && !inPreview,
       [LAYER.dayPreview]: layers.predicted && inPreview,
       [LAYER.events]: layers.events,

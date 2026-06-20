@@ -9,6 +9,7 @@ import {
   updateMap,
   layerConfigChange,
   layerVisualChannelConfigChange,
+  interactionConfigChange,
   removeDataset,
 } from '@kepler.gl/actions';
 import { processGeojson, processRowObject } from '@kepler.gl/processors';
@@ -235,6 +236,9 @@ export default function MapContainer({
   const loadedPreviewDateRef = useRef(null);
   // Whether the (date-filtered) events dataset is currently loaded.
   const eventsLoadedRef = useRef(false);
+  // Whether we've forced the corridor tooltip fields onto kepler's interaction
+  // config (addDataToMap's interactionConfig is ignored once datasets exist).
+  const tooltipFixedRef = useRef(false);
 
   // Events relevant to the current view: the previewed day, or today + next 48h
   // on the live map. Recomputed when the feed or the viewed date changes.
@@ -262,6 +266,14 @@ export default function MapContainer({
   // kepler needs when recomputing a colour domain on a channel-field swap).
   const dayFields = useSelector(
     (state) => state.keplerGl?.[MAP_ID]?.visState?.datasets?.[DATA.dayPreview]?.fields
+  );
+  // kepler's hover-tooltip interaction, and whether the predicted dataset is
+  // loaded — used to force our tooltip fields on once predicted data arrives.
+  const tooltipInteraction = useSelector(
+    (state) => state.keplerGl?.[MAP_ID]?.visState?.interactionConfig?.tooltip
+  );
+  const predictedLoaded = useSelector(
+    (state) => Boolean(state.keplerGl?.[MAP_ID]?.visState?.datasets?.[DATA.predicted])
   );
   const zoom = keplerMapState?.zoom;
   const latitude = keplerMapState?.latitude;
@@ -368,6 +380,30 @@ export default function MapContainer({
     }));
     predictedCreatedRef.current = true;
   }, [corridorsPredicted, dispatch]);
+
+  // Force our corridor tooltip fields onto kepler's interaction config once the
+  // predicted dataset exists. addDataToMap's interactionConfig is ignored after
+  // the map is initialized (and keepExistingConfig keeps kepler's auto-generated
+  // default fields), so we override fieldsToShow directly — this is what keeps
+  // segment_id/road_class out and surfaces the interval + confidence on hover.
+  useEffect(() => {
+    if (tooltipFixedRef.current) return;
+    if (!tooltipInteraction || !predictedLoaded) return;
+    const fmt = (fields) => fields.map((f) => ({ name: f.name, format: null }));
+    dispatch(interactionConfigChange({
+      ...tooltipInteraction,
+      enabled: true,
+      config: {
+        ...tooltipInteraction.config,
+        fieldsToShow: {
+          ...(tooltipInteraction.config?.fieldsToShow || {}),
+          [DATA.live]: fmt(LIVE_TOOLTIP_FIELDS),
+          [DATA.predicted]: fmt(PREDICTED_TOOLTIP_FIELDS),
+        },
+      },
+    }));
+    tooltipFixedRef.current = true;
+  }, [tooltipInteraction, predictedLoaded, dispatch]);
 
   // Load / refresh the events dataset, filtered to the current view's dates.
   // Reloads whenever the filtered set changes (new feed, or the viewed date

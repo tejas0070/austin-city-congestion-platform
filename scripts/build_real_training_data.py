@@ -51,6 +51,12 @@ EVENTS_PATH = Path(__file__).resolve().parents[1] / "data" / "events" / "austin_
 
 MAX_READINGS = 120_000          # cap rows pulled (keeps ETL + CSV bounded)
 PAGE = 50_000                   # Socrata page size
+# Minimum Bluetooth matches per 15-min reading. Low-sample readings (especially
+# overnight, where avg samples drop below 1) are a single noisy match and read
+# as spuriously slow → spuriously congested. Requiring >=3 samples yields a
+# realistic diurnal curve (night free-flows, rush hours congest); without it the
+# model learns inverted "congested at 2 AM" noise.
+MIN_SAMPLES = 3
 APP_TOKEN = os.environ.get("SOCRATA_APP_TOKEN") or None
 
 # Map TMSR abbreviated roadway names -> prefixes of normalized primary_st in
@@ -113,8 +119,8 @@ def _fetch_tmsr() -> list[dict]:
         while len(rows) < MAX_READINGS:
             resp = c.get(TMSR_URL, params={
                 "$select": "origin_reader_identifier,origin_roadway,origin_cross_street,"
-                           "average_speed_mph,timestamp",
-                "$where": "average_speed_mph IS NOT NULL",
+                           "average_speed_mph,number_samples,timestamp",
+                "$where": f"average_speed_mph IS NOT NULL AND number_samples >= {MIN_SAMPLES}",
                 "$order": "timestamp",
                 "$limit": PAGE,
                 "$offset": offset,

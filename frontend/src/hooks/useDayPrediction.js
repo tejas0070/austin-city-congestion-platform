@@ -50,6 +50,13 @@ export function useDayPrediction(date) {
     hours: data?.hours ?? [],
     series: data?.series ?? [],
     weatherSource: data?.weather_source ?? null,
+    // Whole-day average forecast confidence (mean of the 24 hourly averages),
+    // null when the model has no quantile/confidence signal.
+    confidenceAvg: data?.confidence_avg ?? null,
+    confidenceLabel: data?.confidence_label ?? null,
+    // Whole-day average congestion (mean of the 24 hourly congestion averages).
+    congestionAvg: data?.congestion_avg ?? null,
+    congestionLevel: data?.congestion_level ?? null,
     loading,
     error,
   };

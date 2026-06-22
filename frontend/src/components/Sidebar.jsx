@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import EventCard from './EventCard';
 import LayerToggle from './LayerToggle';
 import TrafficLegend from './TrafficLegend';
+import ModelPanel from './model/ModelPanel';
 import { formatClock, formatDayClock, formatEventDay } from '../utils/datetime';
 
 /**
@@ -31,8 +32,12 @@ export default function Sidebar({
   liveUpdatedAt,
   predictedFor,
   onOpenCalendar,
-  confidenceAvg,
-  confidenceLabel,
+  modelAccuracyPct,
+  modelAccuracyLoading,
+  dayCard,
+  week,
+  selectedISO,
+  onSelectDay,
 }) {
   const [activeTab, setActiveTab] = useState('layers');
 
@@ -100,7 +105,17 @@ export default function Sidebar({
               </div>
             ))}
             <div className="mt-4">
-              <TrafficLegend confidenceAvg={confidenceAvg} confidenceLabel={confidenceLabel} />
+              <TrafficLegend />
+            </div>
+            <div className="mt-4">
+              <ModelPanel
+                accuracyPct={modelAccuracyPct}
+                accuracyLoading={modelAccuracyLoading}
+                day={dayCard}
+                week={week}
+                selectedISO={selectedISO}
+                onSelectDay={onSelectDay}
+              />
             </div>
           </div>
         )}

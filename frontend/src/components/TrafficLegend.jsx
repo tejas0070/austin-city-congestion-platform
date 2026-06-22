@@ -10,8 +10,9 @@ const CONFIDENCE_DOT = {
   Low: 'bg-red-400',
 };
 
-export default function TrafficLegend({ confidenceAvg, confidenceLabel }) {
+export default function TrafficLegend({ confidenceAvg, confidenceLabel, confidenceScope }) {
   const showConfidence = typeof confidenceAvg === 'number' && !!confidenceLabel;
+  const confidenceHeading = confidenceScope || 'Forecast confidence';
   return (
     <div className="rounded-lg bg-gray-850 p-3">
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
@@ -28,7 +29,7 @@ export default function TrafficLegend({ confidenceAvg, confidenceLabel }) {
       {showConfidence && (
         <div className="mt-3 border-t border-gray-700 pt-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-            Forecast confidence
+            {confidenceHeading}
           </p>
           <div className="mt-1 flex items-center gap-2">
             <span className={`h-3 w-3 rounded-full ${CONFIDENCE_DOT[confidenceLabel] ?? 'bg-gray-400'}`} />

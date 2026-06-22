@@ -132,6 +132,12 @@ Loaded in `frontend/src/components/MapContainer.jsx`, toggled from the sidebar:
   `data/models/model_meta.json` and `docs/model_card.md`. Per-segment interval +
   confidence appear in the Predicted +2h tooltip; the average confidence shows in
   the legend.
+- **Aggregated confidence:** `/api/traffic/corridors/day` returns a per-hour
+  `confidence_avg`/`confidence_label` plus a whole-day average (mean of the 24
+  hourly city-wide averages); `/api/traffic/corridors/week?start=YYYY-MM-DD`
+  rolls 7 days up into a Mon..Sun average. All three paths share
+  `ml_model._segment_confidences`. In day-preview the legend shows the whole-day
+  average and the TimeSliderPanel shows the per-hour + whole-day score.
 
 ### Swapping in real data
 

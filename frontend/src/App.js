@@ -3,6 +3,8 @@ import { useTrafficData } from './hooks/useTrafficData';
 import { useEvents } from './hooks/useEvents';
 import { useWeather } from './hooks/useWeather';
 import { useDayPrediction } from './hooks/useDayPrediction';
+import { useWeekConfidence } from './hooks/useWeekConfidence';
+import { useModelInfo } from './hooks/useModelInfo';
 import MapContainer from './components/MapContainer';
 import Sidebar from './components/Sidebar';
 import LoadingOverlay from './components/LoadingOverlay';
@@ -39,12 +41,27 @@ export default function App() {
   const [previewHour, setPreviewHour] = useState(DEFAULT_PREVIEW_HOUR);
   const [isPlaying, setIsPlaying] = useState(false);
 
-  const day = useDayPrediction(previewDate);
-
   const todayISO = toISODate(new Date());
+  // The model panel is always on: it reflects the previewed day, or today in
+  // live view. Both day and week predictions key off this anchor.
+  const anchorISO = previewDate ?? todayISO;
+  const day = useDayPrediction(anchorISO);
+  const week = useWeekConfidence(anchorISO);
+  const model = useModelInfo();
+
   const maxDate = new Date();
   maxDate.setDate(maxDate.getDate() + PREVIEW_HORIZON_DAYS);
   const maxISO = toISODate(maxDate);
+
+  const dayCard = {
+    date: anchorISO,
+    confidenceAvg: day.confidenceAvg,
+    confidenceLabel: day.confidenceLabel,
+    congestionAvg: day.congestionAvg,
+    congestionLevel: day.congestionLevel,
+    hours: day.hours,
+    loading: day.loading,
+  };
 
   // Auto-advance the hour while playing.
   useEffect(() => {
@@ -95,8 +112,12 @@ export default function App() {
         liveUpdatedAt={corridors?.generated_at}
         predictedFor={previewDate ? null : corridorsPredicted?.predicted_for}
         onOpenCalendar={() => setCalendarOpen(true)}
-        confidenceAvg={!previewDate && layers.predicted ? corridorsPredicted?.confidence_avg : undefined}
-        confidenceLabel={!previewDate && layers.predicted ? corridorsPredicted?.confidence_label : undefined}
+        modelAccuracyPct={model.accuracyPct}
+        modelAccuracyLoading={model.loading}
+        dayCard={dayCard}
+        week={week}
+        selectedISO={anchorISO}
+        onSelectDay={handleSelectDay}
       />
       <MapContainer
         liveTraffic={liveTraffic}
@@ -132,6 +153,8 @@ export default function App() {
           onSelectHour={setPreviewHour}
           onClose={handleExitPreview}
           weatherSource={day.weatherSource}
+          confidenceAvg={day.confidenceAvg}
+          confidenceLabel={day.confidenceLabel}
           loading={day.loading}
           error={day.error}
         />

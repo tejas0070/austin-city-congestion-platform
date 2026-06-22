@@ -9,6 +9,7 @@ from ...services.segments_service import build_live_segments, segment_count
 from ...services.ml_model import (
     predict_segments,
     predict_day,
+    predict_week,
     get_model_meta,
     model_is_available,
 )
@@ -73,6 +74,34 @@ async def get_corridors_day(
         raise HTTPException(status_code=503, detail="Prediction model unavailable")
 
     return await predict_day(target, include_events=include_events)
+
+
+@router.get("/corridors/week")
+async def get_corridors_week(
+    start: str = Query(..., description="First local date of the 7-day window, YYYY-MM-DD"),
+    include_events: bool = Query(True, description="Include event attendance as a feature"),
+):
+    """Whole-week forecast confidence: 7 daily averages + an overall week average."""
+    try:
+        start_date = datetime.strptime(start, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="start must be formatted YYYY-MM-DD")
+
+    days_ahead = (start_date - datetime.now().date()).days
+    # The week containing "today" starts on Monday, which may be up to 6 days in
+    # the past, so allow a start that far back; the model still produces an
+    # expectation for elapsed days. The window spans start..start+6, so the last
+    # day must stay within the forecast horizon.
+    if days_ahead < -6 or days_ahead + 6 > _MAX_PREVIEW_DAYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"start must be within (today-6)..+{_MAX_PREVIEW_DAYS - 6} days",
+        )
+
+    if not model_is_available():
+        raise HTTPException(status_code=503, detail="Prediction model unavailable")
+
+    return await predict_week(start_date, include_events=include_events)
 
 
 @router.get("/model/info")

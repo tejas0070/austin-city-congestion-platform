@@ -16,6 +16,13 @@ import { processGeojson, processRowObject } from '@kepler.gl/processors';
 import { AUSTIN_VIEWPORT, MIN_ZOOM, AUSTIN_GEO_BOUNDS } from '../constants/austinBounds';
 import { buildDayFC, hourField } from '../utils/dayPrediction';
 import { toISODate } from '../utils/calendar';
+import {
+  withLiveTooltips,
+  withPredictedTooltips,
+  withEventTooltips,
+  withDayTooltips,
+  incidentRows,
+} from '../utils/mapTooltips';
 
 const SIDEBAR_WIDTH_PX = 320;
 const MAP_ID = 'austin_traffic_map';
@@ -47,24 +54,31 @@ const CONGESTION_COLOR_RANGE = {
   ],
 };
 
-// Fields shown when hovering a Predicted +2h segment (interval + confidence).
-const PREDICTED_TOOLTIP_FIELDS = [
-  { name: 'road_name' },
-  { name: 'congestion_pct' },
-  { name: 'congestion_low' },
-  { name: 'congestion_high' },
-  { name: 'confidence_pct' },
-  { name: 'confidence_label' },
-];
+// Hover-tooltip field lists, keyed to the user-facing property labels produced by
+// the `with*Tooltips` transforms (see utils/mapTooltips.js). They are set
+// explicitly — rather than letting kepler auto-populate every column — so
+// internal/binding columns (segment_id, road_class, congestion_index, the icon
+// layer's lat/lng/icon, the day layer's cg_* hours) never leak into the tooltip.
+const toFields = (names) => names.map((name) => ({ name, format: null }));
 
-// Fields shown when hovering a Live Traffic segment. Explicitly set (rather than
-// letting kepler auto-populate every property) so internal columns like
-// segment_id / road_class never leak into the tooltip.
-const LIVE_TOOLTIP_FIELDS = [
-  { name: 'road_name' },
-  { name: 'congestion_pct' },
-  { name: 'congestion_level' },
-];
+const LIVE_TOOLTIP_FIELDS = toFields(['Road', 'Congestion', 'Status']);
+const PREDICTED_TOOLTIP_FIELDS = toFields([
+  'Road',
+  'Congestion',
+  'Forecast Range',
+  'Confidence',
+  'Forecast Time',
+]);
+const EVENT_TOOLTIP_FIELDS = toFields([
+  'Event',
+  'Venue',
+  'Date',
+  'Time',
+  'Category',
+  'Attendance',
+]);
+const INCIDENT_TOOLTIP_FIELDS = toFields(['Type', 'Description', 'Severity']);
+const DAY_TOOLTIP_FIELDS = toFields(['Road']);
 
 // Dataset ids (must match the datasets pushed in the load effect).
 const DATA = {
@@ -134,9 +148,9 @@ const EVENTS_LAYER = {
     label: 'Events',
     isVisible: true,
     columns: { geojson: '_geojson' },
-    colorField: { name: 'category', type: 'string' },
+    colorField: { name: 'Category', type: 'string' },
     colorScale: 'ordinal',
-    radiusField: { name: 'expected_attendance', type: 'real' },
+    radiusField: { name: 'Attendance', type: 'real' },
     visConfig: {
       radius: 24,
       radiusRange: [12, 70],
@@ -204,17 +218,6 @@ function eventsForView(fc, previewDate) {
   return { ...fc, features: fc.features.filter((f) => keep(f.properties?.date)) };
 }
 
-function incidentRows(incidents) {
-  return (incidents?.features ?? []).map((f) => ({
-    lat: f.geometry.coordinates[1],
-    lng: f.geometry.coordinates[0],
-    icon: 'place',
-    incident_type: f.properties.incident_type,
-    severity: f.properties.severity,
-    description: f.properties.description,
-  }));
-}
-
 export default function MapContainer({
   liveTraffic,
   corridors,
@@ -236,9 +239,6 @@ export default function MapContainer({
   const loadedPreviewDateRef = useRef(null);
   // Whether the (date-filtered) events dataset is currently loaded.
   const eventsLoadedRef = useRef(false);
-  // Whether we've forced the corridor tooltip fields onto kepler's interaction
-  // config (addDataToMap's interactionConfig is ignored once datasets exist).
-  const tooltipFixedRef = useRef(false);
 
   // Events relevant to the current view: the previewed day, or today + next 48h
   // on the live map. Recomputed when the feed or the viewed date changes.
@@ -267,14 +267,18 @@ export default function MapContainer({
   const dayFields = useSelector(
     (state) => state.keplerGl?.[MAP_ID]?.visState?.datasets?.[DATA.dayPreview]?.fields
   );
-  // kepler's hover-tooltip interaction, and whether the predicted dataset is
-  // loaded — used to force our tooltip fields on once predicted data arrives.
+  // kepler's hover-tooltip interaction, plus a stable key of the currently
+  // loaded dataset ids. Together they drive the effect that pins our clean
+  // tooltip fields onto every dataset as they load (addDataToMap's
+  // interactionConfig is ignored once the map exists, and keepExistingConfig
+  // makes kepler auto-add every column for newly loaded datasets).
   const tooltipInteraction = useSelector(
     (state) => state.keplerGl?.[MAP_ID]?.visState?.interactionConfig?.tooltip
   );
-  const predictedLoaded = useSelector(
-    (state) => Boolean(state.keplerGl?.[MAP_ID]?.visState?.datasets?.[DATA.predicted])
-  );
+  const loadedDatasetKey = useSelector((state) => {
+    const datasets = state.keplerGl?.[MAP_ID]?.visState?.datasets;
+    return datasets ? Object.keys(datasets).sort().join(',') : '';
+  });
   const zoom = keplerMapState?.zoom;
   const latitude = keplerMapState?.latitude;
   const longitude = keplerMapState?.longitude;
@@ -310,12 +314,12 @@ export default function MapContainer({
     const datasets = [];
     const initialLayers = [];
 
-    datasets.push({ info: { id: DATA.live, label: 'Live Traffic' }, data: processGeojson(corridors) });
+    datasets.push({ info: { id: DATA.live, label: 'Live Traffic' }, data: processGeojson(withLiveTooltips(corridors)) });
     initialLayers.push(corridorLineLayer(LAYER.live, DATA.live, 'Live Traffic', true));
 
     const hasPredicted = corridorsPredicted?.features?.length > 0;
     if (hasPredicted) {
-      datasets.push({ info: { id: DATA.predicted, label: 'Predicted +2h (ML)' }, data: processGeojson(corridorsPredicted) });
+      datasets.push({ info: { id: DATA.predicted, label: 'Predicted +2h (ML)' }, data: processGeojson(withPredictedTooltips(corridorsPredicted)) });
       initialLayers.push(corridorLineLayer(LAYER.predicted, DATA.predicted, 'Predicted +2h (ML)', false));
     }
 
@@ -367,7 +371,7 @@ export default function MapContainer({
     dispatch(addDataToMap({
       datasets: [{
         info: { id: DATA.predicted, label: 'Predicted +2h (ML)' },
-        data: processGeojson(corridorsPredicted),
+        data: processGeojson(withPredictedTooltips(corridorsPredicted)),
       }],
       // keepExistingConfig:true is REQUIRED. Without it, addDataToMap runs
       // resetMapConfigUpdater and wipes every existing layer, rebuilding only
@@ -381,29 +385,42 @@ export default function MapContainer({
     predictedCreatedRef.current = true;
   }, [corridorsPredicted, dispatch]);
 
-  // Force our corridor tooltip fields onto kepler's interaction config once the
-  // predicted dataset exists. addDataToMap's interactionConfig is ignored after
-  // the map is initialized (and keepExistingConfig keeps kepler's auto-generated
-  // default fields), so we override fieldsToShow directly — this is what keeps
-  // segment_id/road_class out and surfaces the interval + confidence on hover.
+  // Pin our user-facing tooltip fields onto every dataset as it loads.
+  // addDataToMap's interactionConfig is ignored once the map exists, and
+  // keepExistingConfig makes kepler auto-add EVERY column for a newly loaded
+  // dataset (which would leak the event `id`, the day layer's cg_* hours, the
+  // incident lat/lng/icon, etc.). Re-running whenever the loaded-dataset set
+  // changes lets us re-assert the clean fields after events/day-preview reload.
+  // Idempotent: only dispatches when a present dataset's fields differ.
   useEffect(() => {
-    if (tooltipFixedRef.current) return;
-    if (!tooltipInteraction || !predictedLoaded) return;
-    const fmt = (fields) => fields.map((f) => ({ name: f.name, format: null }));
+    if (!tooltipInteraction || !loadedDatasetKey) return;
+    const wanted = {
+      [DATA.live]: LIVE_TOOLTIP_FIELDS,
+      [DATA.predicted]: PREDICTED_TOOLTIP_FIELDS,
+      [DATA.dayPreview]: DAY_TOOLTIP_FIELDS,
+      [DATA.events]: EVENT_TOOLTIP_FIELDS,
+      [DATA.incidents]: INCIDENT_TOOLTIP_FIELDS,
+    };
+    const sameFields = (a, b) =>
+      Array.isArray(a) && a.length === b.length && a.every((f, i) => f.name === b[i].name);
+
+    const current = tooltipInteraction.config?.fieldsToShow || {};
+    const next = { ...current };
+    let changed = false;
+    for (const id of loadedDatasetKey.split(',')) {
+      if (wanted[id] && !sameFields(current[id], wanted[id])) {
+        next[id] = wanted[id];
+        changed = true;
+      }
+    }
+    if (!changed) return;
+
     dispatch(interactionConfigChange({
       ...tooltipInteraction,
       enabled: true,
-      config: {
-        ...tooltipInteraction.config,
-        fieldsToShow: {
-          ...(tooltipInteraction.config?.fieldsToShow || {}),
-          [DATA.live]: fmt(LIVE_TOOLTIP_FIELDS),
-          [DATA.predicted]: fmt(PREDICTED_TOOLTIP_FIELDS),
-        },
-      },
+      config: { ...tooltipInteraction.config, fieldsToShow: next },
     }));
-    tooltipFixedRef.current = true;
-  }, [tooltipInteraction, predictedLoaded, dispatch]);
+  }, [tooltipInteraction, loadedDatasetKey, dispatch]);
 
   // Load / refresh the events dataset, filtered to the current view's dates.
   // Reloads whenever the filtered set changes (new feed, or the viewed date
@@ -420,7 +437,7 @@ export default function MapContainer({
     if (!mapEvents?.features?.length) return;
 
     dispatch(addDataToMap({
-      datasets: [{ info: { id: DATA.events, label: 'Events' }, data: processGeojson(mapEvents) }],
+      datasets: [{ info: { id: DATA.events, label: 'Events' }, data: processGeojson(withEventTooltips(mapEvents)) }],
       options: { centerMap: false, readOnly: true, autoCreateLayers: false, keepExistingConfig: true },
       config: { visState: { layers: [EVENTS_LAYER] } },
     }));
@@ -447,7 +464,7 @@ export default function MapContainer({
       dispatch(removeDataset(DATA.dayPreview));
     }
     dispatch(addDataToMap({
-      datasets: [{ info: { id: DATA.dayPreview, label: 'Day Preview' }, data: processGeojson(dayFC) }],
+      datasets: [{ info: { id: DATA.dayPreview, label: 'Day Preview' }, data: processGeojson(withDayTooltips(dayFC)) }],
       // keepExistingConfig:true is REQUIRED — see the Predicted effect above.
       // Without it, selecting a day resets the whole map to just this layer.
       options: { centerMap: false, readOnly: true, autoCreateLayers: false, keepExistingConfig: true },

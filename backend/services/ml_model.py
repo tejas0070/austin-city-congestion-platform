@@ -6,6 +6,7 @@ returns predicted congestion as GeoJSON LineStrings for every Austin segment.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -72,6 +73,35 @@ def _load_quantiles():
 def _width_anchors() -> tuple[float, float]:
     meta = get_model_meta().get("width_anchors", {})
     return float(meta.get("p5", 5.0)), float(meta.get("p95", 40.0))
+
+
+def _segment_confidences(rows: list[dict]) -> list[tuple[float, float, float]] | None:
+    """Per-segment (low, high, confidence) from the q10/q90 interval widths.
+
+    Returns one tuple per row, or None when quantile models are unavailable (so
+    callers degrade to predictions without a confidence signal). Confidence is
+    the single source of truth shared by the single-time, whole-day, and
+    whole-week paths.
+    """
+    if not rows or not quantiles_are_available():
+        return None
+    quants = _load_quantiles()
+    if quants is None:
+        return None
+    frame = pd.DataFrame(rows)[FEATURE_ORDER]
+    low_preds = quants["q10"].predict(frame)
+    high_preds = quants["q90"].predict(frame)
+    w_low, w_high = _width_anchors()
+    out: list[tuple[float, float, float]] = []
+    for lo_raw, hi_raw in zip(low_preds, high_preds):
+        lo, hi = clamp_interval(float(lo_raw), float(hi_raw))
+        out.append((lo, hi, width_to_confidence(hi - lo, w_low, w_high)))
+    return out
+
+
+def _mean_confidence(confidences: list[float]) -> float:
+    """City-wide average confidence (rounded to 0.1) over a list of segments."""
+    return round(sum(confidences) / len(confidences), 1) if confidences else 0.0
 
 
 def _parse_events(raw_events: list[dict]) -> list[dict]:
@@ -166,17 +196,25 @@ async def predict_for_datetime(
     if events is None:
         events = await _resolve_events(include_events)
 
+    # The model inference + GeoJSON assembly are CPU-bound and synchronous; run
+    # them off the event loop so concurrent requests (model info, the day/week
+    # panels) are not starved while one prediction is computed.
+    return await asyncio.to_thread(
+        _build_datetime_fc, target_dt, code, temp_f, precip_in, events
+    )
+
+
+def _build_datetime_fc(
+    target_dt: datetime,
+    code: int,
+    temp_f: float,
+    precip_in: float,
+    events: list[dict],
+) -> dict:
+    """Synchronous core of predict_for_datetime (runs in a worker thread)."""
     segments, rows, predictions = _run_predictions(target_dt, code, temp_f, precip_in, events)
 
-    quants = None
-    if quantiles_are_available():
-        quants = _load_quantiles()
-    low_preds = high_preds = None
-    if quants is not None and segments:
-        frame = pd.DataFrame(rows)[FEATURE_ORDER]
-        low_preds = quants["q10"].predict(frame)
-        high_preds = quants["q90"].predict(frame)
-    w_low, w_high = _width_anchors()
+    intervals = _segment_confidences(rows)
 
     confidences: list[float] = []
     features: list[dict] = []
@@ -193,9 +231,8 @@ async def predict_for_datetime(
             "nearby_event_attendance": row["nearby_event_attendance"],
             "predicted_for": target_dt.isoformat(timespec="minutes"),
         }
-        if low_preds is not None:
-            lo, hi = clamp_interval(float(low_preds[i]), float(high_preds[i]))
-            conf = width_to_confidence(hi - lo, w_low, w_high)
+        if intervals is not None:
+            lo, hi, conf = intervals[i]
             confidences.append(conf)
             props.update({
                 "congestion_low": round(lo, 1),
@@ -209,7 +246,7 @@ async def predict_for_datetime(
     result["generated_at"] = datetime.now().isoformat(timespec="seconds")
     result["predicted_for"] = target_dt.isoformat(timespec="minutes")
     if confidences:
-        avg = round(sum(confidences) / len(confidences), 1)
+        avg = _mean_confidence(confidences)
         result["confidence_avg"] = avg
         result["confidence_label"] = confidence_label(avg)
     return result
@@ -239,17 +276,28 @@ def _hour_label(hour: int) -> str:
     return f"{hour12}:00 {period}"
 
 
+_geometry_fc_cache: dict | None = None
+
+
 def _segments_geometry_fc() -> dict:
-    """GeoJSON of segment geometry + static props only (sent once per day response)."""
-    features = [
-        build_line_feature(seg["coords"], {
-            "segment_id": seg["segment_id"],
-            "road_name": seg["name"],
-            "road_class": seg["road_class"],
-        })
-        for seg in load_segments()
-    ]
-    return build_feature_collection(features)
+    """GeoJSON of segment geometry + static props only (sent once per day response).
+
+    Memoized: the segment network is static, so building the ~3,800-feature
+    collection once and reusing it avoids rebuilding it on every day prediction
+    (the week path would otherwise rebuild it 7×).
+    """
+    global _geometry_fc_cache
+    if _geometry_fc_cache is None:
+        features = [
+            build_line_feature(seg["coords"], {
+                "segment_id": seg["segment_id"],
+                "road_name": seg["name"],
+                "road_class": seg["road_class"],
+            })
+            for seg in load_segments()
+        ]
+        _geometry_fc_cache = build_feature_collection(features)
+    return _geometry_fc_cache
 
 
 async def predict_day(target_date: date, include_events: bool = True) -> dict:
@@ -284,9 +332,27 @@ async def predict_day(target_date: date, include_events: bool = True) -> dict:
     days_until = (target_date - datetime.now().date()).days
     events = await _resolve_events(include_events, days=max(7, days_until + 1))
 
+    # All 24 hours of model inference are CPU-bound; compute them in a worker
+    # thread so the event loop stays responsive to other requests.
+    result = await asyncio.to_thread(
+        _compute_day, target_date, current, forecast, events
+    )
+    set_cache(cache_key, result, _DAY_CACHE_TTL)
+    return result
+
+
+def _compute_day(
+    target_date: date,
+    current: dict,
+    forecast: dict | None,
+    events: list[dict],
+) -> dict:
+    """Synchronous core of predict_day (runs in a worker thread)."""
     hours_meta: list[dict] = []
     series: list[list[int]] = []
     sources: set[str] = set()
+    hourly_confidences: list[float] = []  # one city-wide average per hour
+    hourly_congestions: list[float] = []  # one city-wide congestion avg per hour
 
     for hour in range(24):
         hour_dt = datetime(target_date.year, target_date.month, target_date.day, hour)
@@ -297,7 +363,7 @@ async def predict_day(target_date: date, include_events: bool = True) -> dict:
         sources.add(source)
 
         code, temp_f, precip_in, condition = _resolve_weather(weather)
-        _, _, predictions = _run_predictions(hour_dt, code, temp_f, precip_in, events)
+        _, rows, predictions = _run_predictions(hour_dt, code, temp_f, precip_in, events)
 
         indices: list[int] = []
         total_pct = 0.0
@@ -308,9 +374,10 @@ async def predict_day(target_date: date, include_events: bool = True) -> dict:
             total_pct += pct
         avg_pct = round(total_pct / len(predictions), 1) if len(predictions) else 0.0
         avg_level, _ = congestion_level(avg_pct)
+        hourly_congestions.append(avg_pct)
 
         series.append(indices)
-        hours_meta.append({
+        meta = {
             "hour": hour,
             "label": _hour_label(hour),
             "predicted_for": hour_dt.isoformat(timespec="minutes"),
@@ -319,7 +386,16 @@ async def predict_day(target_date: date, include_events: bool = True) -> dict:
             "temperature_f": round(temp_f, 1),
             "condition": condition,
             "weather_source": source,
-        })
+        }
+
+        intervals = _segment_confidences(rows)
+        if intervals is not None:
+            hour_conf = _mean_confidence([conf for _, _, conf in intervals])
+            hourly_confidences.append(hour_conf)
+            meta["confidence_avg"] = hour_conf
+            meta["confidence_label"] = confidence_label(hour_conf)
+
+        hours_meta.append(meta)
 
     weather_source = "mixed" if len(sources) > 1 else next(iter(sources), "proxy")
     result = {
@@ -330,5 +406,86 @@ async def predict_day(target_date: date, include_events: bool = True) -> dict:
         "hours": hours_meta,
         "series": series,
     }
-    set_cache(cache_key, result, _DAY_CACHE_TTL)
+    # Whole-day confidence = mean of the 24 hourly city-wide averages. Each hour
+    # is weighted equally, so the day score reflects the average across time.
+    if hourly_confidences:
+        day_avg = _mean_confidence(hourly_confidences)
+        result["confidence_avg"] = day_avg
+        result["confidence_label"] = confidence_label(day_avg)
+    # Whole-day congestion = mean of the 24 hourly city-wide congestion averages.
+    if hourly_congestions:
+        cong_avg = round(sum(hourly_congestions) / len(hourly_congestions), 1)
+        result["congestion_avg"] = cong_avg
+        result["congestion_level"] = congestion_level(cong_avg)[0]
     return result
+
+
+_WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday",
+                  "Friday", "Saturday", "Sunday")
+_WEEK_LENGTH = 7
+
+
+async def predict_week(start_date: date, include_events: bool = True) -> dict:
+    """Aggregate whole-day confidence across the 7 days starting at start_date.
+
+    Reuses predict_day per day (so each day's own 15-min cache is shared with the
+    day-preview view), then averages the daily confidence scores into one
+    Mon..Sun-style week summary. The payload is intentionally compact — daily
+    summaries only, no geometry — so the week view stays cheap to fetch.
+    """
+    _load_model()  # surface FileNotFoundError before doing work
+
+    days: list[dict] = []
+    daily_confidences: list[float] = []
+    daily_congestions: list[float] = []
+    for offset in range(_WEEK_LENGTH):
+        target = start_date + timedelta(days=offset)
+        day = await predict_day(target, include_events=include_events)
+        entry = {
+            "date": target.isoformat(),
+            "weekday": _WEEKDAY_NAMES[target.weekday()],
+            "weather_source": day.get("weather_source"),
+        }
+        if "confidence_avg" in day:
+            entry["confidence_avg"] = day["confidence_avg"]
+            entry["confidence_label"] = day["confidence_label"]
+            daily_confidences.append(day["confidence_avg"])
+        if "congestion_avg" in day:
+            entry["congestion_avg"] = day["congestion_avg"]
+            entry["congestion_level"] = day["congestion_level"]
+            daily_congestions.append(day["congestion_avg"])
+        days.append(entry)
+
+    result = {
+        "start_date": start_date.isoformat(),
+        "end_date": (start_date + timedelta(days=_WEEK_LENGTH - 1)).isoformat(),
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "days": days,
+    }
+    if daily_confidences:
+        week_avg = _mean_confidence(daily_confidences)
+        result["confidence_avg"] = week_avg
+        result["confidence_label"] = confidence_label(week_avg)
+    if daily_congestions:
+        week_cong = round(sum(daily_congestions) / len(daily_congestions), 1)
+        result["congestion_avg"] = week_cong
+        result["congestion_level"] = congestion_level(week_cong)[0]
+    return result
+
+
+async def warm_caches() -> None:
+    """Precompute the predictions the UI loads first — the +2h forecast, today's
+    whole day, and the current Mon–Sun week — so the first page load hits warm
+    caches instead of waiting on cold, CPU-bound inference. Best-effort: any
+    failure is swallowed so it can never block or crash startup.
+    """
+    if not model_is_available():
+        return
+    try:
+        await predict_segments(hours_ahead=2.0)
+        today = date.today()
+        await predict_day(today)
+        monday = today - timedelta(days=today.weekday())
+        await predict_week(monday)
+    except Exception:  # noqa: BLE001 - warming is best-effort
+        pass

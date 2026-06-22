@@ -7,6 +7,17 @@ const WEATHER_BADGE = {
   proxy: { label: 'Est. weather', className: 'bg-amber-500/20 text-amber-300' },
 };
 
+// Colour the confidence badge by its High/Medium/Low band.
+const CONFIDENCE_BADGE = {
+  High: 'bg-green-500/20 text-green-300',
+  Medium: 'bg-yellow-500/20 text-yellow-300',
+  Low: 'bg-red-500/20 text-red-300',
+};
+
+function confidenceBadgeClass(label) {
+  return CONFIDENCE_BADGE[label] || 'bg-gray-600/30 text-gray-300';
+}
+
 function dayLabel(dateISO) {
   try {
     return format(parseISO(dateISO), 'EEE, MMM d');
@@ -28,12 +39,16 @@ export default function TimeSliderPanel({
   onSelectHour,
   onClose,
   weatherSource,
+  confidenceAvg,
+  confidenceLabel,
   loading,
   error,
 }) {
   const hour = hours?.[currentHour];
   const badge = weatherSource ? WEATHER_BADGE[weatherSource] : null;
   const hasData = !loading && !error && hours.length > 0;
+  const showDayConfidence = typeof confidenceAvg === 'number' && !!confidenceLabel;
+  const hourHasConfidence = hour && typeof hour.confidence_avg === 'number';
 
   return (
     <div className="fixed bottom-4 left-[21rem] right-4 z-20 rounded-xl border border-gray-700 bg-gray-900/95 p-3 shadow-2xl backdrop-blur">
@@ -46,8 +61,21 @@ export default function TimeSliderPanel({
               · {Math.round(hour.temperature_f)}°F {hour.condition}
             </span>
           )}
+          {hourHasConfidence && (
+            <span className="truncate text-xs text-gray-500">
+              · {Math.round(hour.confidence_avg)}% confidence
+            </span>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {showDayConfidence && (
+            <span
+              title="Average forecast confidence across the whole day"
+              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${confidenceBadgeClass(confidenceLabel)}`}
+            >
+              Day {Math.round(confidenceAvg)}%
+            </span>
+          )}
           {badge && (
             <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${badge.className}`}>
               {badge.label}

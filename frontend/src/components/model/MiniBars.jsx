@@ -36,7 +36,7 @@ export default function MiniBars({ bars, areaHeight = 48, gap = 2, onSelect, axi
               }`}
             >
               {hasTop && (
-                <span className="h-3.5 text-[9px] font-bold leading-none text-gray-300">
+                <span className="h-3.5 font-mono text-[9px] font-semibold leading-none tabular-nums text-ink-soft">
                   {bar.topLabel ?? ''}
                 </span>
               )}
@@ -46,15 +46,15 @@ export default function MiniBars({ bars, areaHeight = 48, gap = 2, onSelect, axi
                   style={{
                     height: `${bar.heightPct}%`,
                     backgroundColor: bar.color,
-                    outline: bar.selected ? '2px solid #fff' : 'none',
+                    outline: bar.selected ? '2px solid #6B5B95' : 'none',
                     outlineOffset: '1px',
                   }}
                 />
               </span>
               {hasBottom && (
                 <span
-                  className={`mt-1 h-3 text-[10px] leading-none ${
-                    bar.selected ? 'font-extrabold text-white' : 'text-gray-500'
+                  className={`mt-1 h-3 font-mono text-[10px] leading-none ${
+                    bar.selected ? 'font-bold text-violet' : 'text-ink-faint'
                   }`}
                 >
                   {bar.bottomLabel ?? ''}
@@ -65,7 +65,7 @@ export default function MiniBars({ bars, areaHeight = 48, gap = 2, onSelect, axi
         })}
       </div>
       {axis && (
-        <div className="mt-1 flex justify-between text-[8px] text-gray-600">
+        <div className="mt-1 flex justify-between font-mono text-[8px] text-ink-faint">
           {axis.map((label, i) => (
             <span key={i}>{label}</span>
           ))}

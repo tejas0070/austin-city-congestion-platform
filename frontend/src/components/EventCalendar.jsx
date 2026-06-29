@@ -38,21 +38,21 @@ export default function EventCalendar({ events, onSelectDay, onClose, minISO, ma
       role="presentation"
     >
       <div
-        className="w-full max-w-2xl rounded-xl border border-gray-700 bg-gray-900 p-4 shadow-2xl"
+        className="w-full max-w-2xl rounded-2xl border border-stone bg-surface p-4 shadow-float"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-bold text-white">{monthLabel}</h2>
-          <div className="flex items-center gap-3 text-gray-300">
-            <button type="button" onClick={() => shiftMonth(-1)} aria-label="Previous month" className="hover:text-white">◀</button>
-            <button type="button" onClick={() => shiftMonth(1)} aria-label="Next month" className="hover:text-white">▶</button>
-            <button type="button" onClick={onClose} aria-label="Close calendar" className="ml-1 hover:text-white">✕</button>
+          <h2 className="font-display text-base font-bold uppercase tracking-[0.12em] text-ink">{monthLabel}</h2>
+          <div className="flex items-center gap-1 text-ink-soft">
+            <button type="button" onClick={() => shiftMonth(-1)} aria-label="Previous month" className="grid size-7 place-items-center rounded-md transition-colors hover:bg-stone-soft hover:text-ink">◀</button>
+            <button type="button" onClick={() => shiftMonth(1)} aria-label="Next month" className="grid size-7 place-items-center rounded-md transition-colors hover:bg-stone-soft hover:text-ink">▶</button>
+            <button type="button" onClick={onClose} aria-label="Close calendar" className="ml-1 grid size-7 place-items-center rounded-md transition-colors hover:bg-stone-soft hover:text-ink">✕</button>
           </div>
         </div>
 
         <div className="mb-1 grid grid-cols-7 gap-1">
           {WEEKDAYS.map((d) => (
-            <div key={d} className="text-center text-[10px] font-bold tracking-wide text-gray-500">{d}</div>
+            <div key={d} className="text-center font-mono text-[10px] font-semibold tracking-[0.1em] text-ink-faint">{d}</div>
           ))}
         </div>
 
@@ -68,13 +68,13 @@ export default function EventCalendar({ events, onSelectDay, onClose, minISO, ma
                 disabled={!selectable}
                 onClick={() => selectable && onSelectDay(cell.iso)}
                 className={[
-                  'flex h-16 flex-col rounded-md p-1 text-left transition-colors',
-                  cell.inMonth ? 'bg-gray-800' : 'bg-gray-850/40',
-                  selectable ? 'hover:bg-gray-700 cursor-pointer' : 'cursor-default',
-                  isToday ? 'ring-2 ring-blue-500' : '',
+                  'flex h-16 flex-col rounded-lg border p-1 text-left transition-colors',
+                  cell.inMonth ? 'border-stone bg-surface-hi' : 'border-transparent bg-stone-soft/40',
+                  selectable ? 'cursor-pointer hover:border-violet/40 hover:bg-violet-tint' : 'cursor-default',
+                  isToday ? 'ring-2 ring-violet' : '',
                 ].join(' ')}
               >
-                <span className={`text-[10px] ${cell.inMonth ? 'text-gray-300' : 'text-gray-600'} ${!selectable && cell.inMonth ? 'opacity-50' : ''}`}>
+                <span className={`font-mono text-[10px] tabular-nums ${cell.inMonth ? 'text-ink' : 'text-ink-faint'} ${!selectable && cell.inMonth ? 'opacity-50' : ''}`}>
                   {cell.day}
                 </span>
                 <div className="mt-0.5 flex flex-col gap-0.5 overflow-hidden">
@@ -89,7 +89,7 @@ export default function EventCalendar({ events, onSelectDay, onClose, minISO, ma
                     </span>
                   ))}
                   {dayEvents.length > MAX_CHIPS && (
-                    <span className="text-[8px] text-gray-400">+{dayEvents.length - MAX_CHIPS} more</span>
+                    <span className="text-[8px] text-ink-soft">+{dayEvents.length - MAX_CHIPS} more</span>
                   )}
                 </div>
               </button>
@@ -97,11 +97,11 @@ export default function EventCalendar({ events, onSelectDay, onClose, minISO, ma
           })}
         </div>
 
-        <div className="mt-3 flex items-center gap-4 text-[10px] text-gray-400">
+        <div className="mt-3 flex items-center gap-4 text-[10px] text-ink-soft">
           <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm" style={{ background: '#3B82F6' }} /> Sports</span>
           <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm" style={{ background: '#A855F7' }} /> Music</span>
           <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm" style={{ background: '#22C55E' }} /> Other</span>
-          <span className="ml-auto text-blue-400">Click a day to preview its traffic by hour</span>
+          <span className="ml-auto font-mono uppercase tracking-wide text-violet">Click a day to preview traffic by hour</span>
         </div>
       </div>
     </div>

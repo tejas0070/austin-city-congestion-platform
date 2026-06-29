@@ -10,7 +10,10 @@ import Sidebar from './components/Sidebar';
 import LoadingOverlay from './components/LoadingOverlay';
 import EventCalendar from './components/EventCalendar';
 import TimeSliderPanel from './components/TimeSliderPanel';
+import IntroSplash from './components/IntroSplash';
 import { toISODate } from './utils/calendar';
+
+const SPLASH_SEEN_KEY = 'atx_splash_seen';
 
 
 const INITIAL_LAYERS = {
@@ -34,6 +37,12 @@ export default function App() {
   const { liveTraffic, corridors, corridorsPredicted, incidents, loading: trafficLoading } = useTrafficData();
   const { events, eventsGeojson } = useEvents(PREVIEW_HORIZON_DAYS);
   const { weather } = useWeather();
+
+  // Show the intro splash once per browser session; the dashboard mounts behind
+  // it so traffic data prefetches while the animation plays.
+  const [showSplash, setShowSplash] = useState(
+    () => sessionStorage.getItem(SPLASH_SEEN_KEY) !== '1'
+  );
 
   const [layers, setLayers] = useState(INITIAL_LAYERS);
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -99,11 +108,32 @@ export default function App() {
     setLayers((prev) => ({ ...prev, predicted: false, live_traffic: true }));
   }
 
+  function handleEnter() {
+    sessionStorage.setItem(SPLASH_SEEN_KEY, '1');
+    setShowSplash(false);
+  }
+
   const isLoading = trafficLoading;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
-      {isLoading && <LoadingOverlay />}
+    <div className="relative h-screen w-screen overflow-hidden bg-paper">
+      {showSplash && <IntroSplash onEnter={handleEnter} />}
+      {/* While the splash is up it's the only curtain — data prefetches behind
+          the spiral. The loading overlay is for the post-Enter wait, if any. */}
+      {isLoading && !showSplash && <LoadingOverlay />}
+      {/* Map is the full-screen base; the sidebar console floats over it. */}
+      <MapContainer
+        liveTraffic={liveTraffic}
+        corridors={corridors}
+        corridorsPredicted={corridorsPredicted}
+        eventsGeojson={eventsGeojson}
+        incidents={incidents}
+        layers={layers}
+        previewDate={previewDate}
+        previewHour={previewHour}
+        daySegments={day.segments}
+        daySeries={day.series}
+      />
       <Sidebar
         events={events}
         weather={weather}
@@ -118,18 +148,6 @@ export default function App() {
         week={week}
         selectedISO={anchorISO}
         onSelectDay={handleSelectDay}
-      />
-      <MapContainer
-        liveTraffic={liveTraffic}
-        corridors={corridors}
-        corridorsPredicted={corridorsPredicted}
-        eventsGeojson={eventsGeojson}
-        incidents={incidents}
-        layers={layers}
-        previewDate={previewDate}
-        previewHour={previewHour}
-        daySegments={day.segments}
-        daySeries={day.series}
       />
 
       {calendarOpen && (

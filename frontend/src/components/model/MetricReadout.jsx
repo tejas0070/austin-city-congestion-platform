@@ -45,7 +45,7 @@ export default function MetricReadout({
         <span aria-hidden="true">{marker}</span> {title}
       </div>
       <div className="mb-1 flex items-baseline justify-between gap-2">
-        <div className="text-2xl font-extrabold leading-none text-white">
+        <div className="font-mono text-2xl font-semibold leading-none tabular-nums text-ink">
           {value}
           {pillText && (
             <span
@@ -55,12 +55,12 @@ export default function MetricReadout({
             </span>
           )}
         </div>
-        {subNote && <span className="shrink-0 text-[11px] text-gray-400">{subNote}</span>}
+        {subNote && <span className="shrink-0 font-mono text-[11px] tabular-nums text-ink-soft">{subNote}</span>}
       </div>
       {bars && bars.length > 0 ? (
         <MiniBars bars={bars} areaHeight={areaHeight} gap={gap} onSelect={onSelect} axis={axis} />
       ) : (
-        emptyNote && <p className="py-2 text-[11px] text-gray-500">{emptyNote}</p>
+        emptyNote && <p className="py-2 text-[11px] text-ink-faint">{emptyNote}</p>
       )}
     </div>
   );

@@ -26,7 +26,7 @@ function round(value) {
   return typeof value === 'number' ? Math.round(value) : null;
 }
 
-const CARD = 'rounded-xl border border-gray-700 bg-gray-900 p-3.5';
+const CARD = 'rounded-xl border border-stone bg-surface-hi p-3.5';
 
 /**
  * Week-scale model card: a Confidence readout and a Congestion readout, each a
@@ -60,7 +60,7 @@ export default function WeekModelCard({ week, selectedISO, onSelectDay }) {
   } = week;
 
   const header = (
-    <div className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+    <div className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-faint">
       Week · {short(startDate)}
       {endDate ? ` – ${short(endDate)}` : ''} · Mon–Sun
     </div>
@@ -70,7 +70,7 @@ export default function WeekModelCard({ week, selectedISO, onSelectDay }) {
     return (
       <div className={CARD}>
         {header}
-        <p className="text-[11px] text-gray-500">Week forecast unavailable for this date range.</p>
+        <p className="text-[11px] text-ink-faint">Week forecast unavailable for this date range.</p>
       </div>
     );
   }
@@ -78,7 +78,7 @@ export default function WeekModelCard({ week, selectedISO, onSelectDay }) {
     return (
       <div className={CARD}>
         {header}
-        <p className="text-[11px] text-red-400">{error}</p>
+        <p className="text-[11px] text-signal-red-ink">{error}</p>
       </div>
     );
   }
@@ -86,7 +86,7 @@ export default function WeekModelCard({ week, selectedISO, onSelectDay }) {
     return (
       <div className={CARD}>
         {header}
-        <div className="h-32 animate-pulse rounded bg-gray-800" />
+        <div className="h-32 animate-pulse rounded bg-stone-soft" />
       </div>
     );
   }
@@ -130,7 +130,7 @@ export default function WeekModelCard({ week, selectedISO, onSelectDay }) {
         onSelect={handleSelect}
       />
 
-      <div className="my-3.5 h-px bg-gray-700" />
+      <div className="my-3.5 h-px bg-stone" />
 
       <MetricReadout
         marker="▮"

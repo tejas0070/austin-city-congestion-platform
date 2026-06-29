@@ -121,17 +121,23 @@ Loaded in `frontend/src/components/MapContainer.jsx`, toggled from the sidebar:
 - **Model:** `HistGradientBoostingRegressor` → `data/models/congestion_model.pkl`.
 - **Features (segment-agnostic, so it generalizes to any road):** road class,
   distance to downtown, hour, day-of-week, weekend, month, weather
-  (code/temp/precip), and distance/time-weighted **nearby event attendance**.
+  (code/temp/precip), distance/time-weighted **nearby event attendance**,
+  `base_pattern` (formula baseline), and **`seasonal_level`** — each segment's
+  *real* typical congestion for that hour-of-week (the model's strongest feature;
+  raised held-out R² from ~0.30 to ~0.70). Served from `data/models/seasonal_prior.json`.
 - **Shared feature code:** `backend/services/congestion_features.py` is the single
   source of truth used by both the data generator and the live predictor.
-- **Current training data is synthetic** (`scripts/generate_training_data.py`),
-  shaped like Austin's rush-hour curves. See "Swapping in real data" below.
-- **Confidence:** q10/q90 quantile models give an 80% prediction interval per
-  segment; interval width maps to a 0-100 confidence score (calibrated to
-  held-out interval-width percentiles). Empirical coverage is reported in
-  `data/models/model_meta.json` and `docs/model_card.md`. Per-segment interval +
-  confidence appear in the Predicted +2h tooltip; the average confidence shows in
-  the legend.
+- **Training data is REAL** (`scripts/build_real_training_data.py`): ~76k City of
+  Austin Bluetooth travel-sensor readings. `scripts/generate_training_data.py`
+  (synthetic) remains only as a fallback. Coverage caveat: only ~12 OSM segments
+  have direct sensor history; others use the road-class seasonal fallback.
+- **Confidence:** served from the tight **central 50% interval** (q25/q75 quantile
+  models); interval width maps to a 0-100 score via **fixed absolute anchors**
+  (`backend/etl/confidence.py`, full=8 / zero=45 pts), so the score is interpretable
+  and improves when the model does. The separate **accuracy badge** is the wide
+  80% interval's empirical coverage (~0.89). Run `python scripts/confidence_report.py`
+  for the with/without-seasonal before/after. Per-segment interval + confidence
+  appear in the Predicted +2h tooltip; aggregates in the Forecast Model panel.
 - **Aggregated confidence:** `/api/traffic/corridors/day` returns a per-hour
   `confidence_avg`/`confidence_label` plus a whole-day average (mean of the 24
   hourly city-wide averages); `/api/traffic/corridors/week?start=YYYY-MM-DD`

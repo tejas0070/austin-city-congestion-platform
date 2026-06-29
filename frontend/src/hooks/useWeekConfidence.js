@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { fetchWeekConfidence } from '../services/trafficService';
 import { weekBounds } from '../utils/modelMetrics';
 
+// Silently re-poll so the week card reflects the self-updater's new model.
+const REFRESH_MS = 3 * 60 * 1000;
+
 /**
  * Fetch the Mon–Sun week of forecast confidence + congestion containing
  * `anchorISO` ("YYYY-MM-DD"). The request is keyed on the derived Monday, so the
@@ -30,29 +33,43 @@ export function useWeekConfidence(anchorISO) {
     }
 
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setUnavailable(false);
-    fetchWeekConfidence(mondayISO)
-      .then((res) => {
-        if (!cancelled) setData(res);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setData(null);
-        // A 400 means the week is beyond the forecast horizon — expected, not a fault.
-        if (err?.response?.status === 400) {
-          setUnavailable(true);
-        } else {
-          setError(err?.message ?? 'Failed to load week forecast');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
 
+    // silent=true keeps current data/loading so a background refresh never
+    // flashes the skeleton or blanks the card on a transient error.
+    const load = (silent) => {
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+        setUnavailable(false);
+      }
+      fetchWeekConfidence(mondayISO)
+        .then((res) => {
+          if (!cancelled) {
+            setData(res);
+            setError(null);
+            setUnavailable(false);
+          }
+        })
+        .catch((err) => {
+          if (cancelled || silent) return;
+          setData(null);
+          // A 400 means the week is beyond the forecast horizon — expected, not a fault.
+          if (err?.response?.status === 400) {
+            setUnavailable(true);
+          } else {
+            setError(err?.message ?? 'Failed to load week forecast');
+          }
+        })
+        .finally(() => {
+          if (!cancelled && !silent) setLoading(false);
+        });
+    };
+
+    load(false);
+    const id = setInterval(() => load(true), REFRESH_MS);
     return () => {
       cancelled = true;
+      clearInterval(id);
     };
   }, [mondayISO]);
 

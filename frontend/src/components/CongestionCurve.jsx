@@ -12,7 +12,7 @@ const LEVEL_COLOR = {
  */
 export default function CongestionCurve({ hours, currentHour, onSelectHour }) {
   if (!hours?.length) {
-    return <div className="h-12 rounded bg-gray-800/60" />;
+    return <div className="h-12 rounded bg-stone-soft" />;
   }
 
   return (
@@ -38,7 +38,7 @@ export default function CongestionCurve({ hours, currentHour, onSelectHour }) {
               }}
             />
             {isCurrent && (
-              <span className="absolute inset-y-0 left-1/2 w-[2px] -translate-x-1/2 bg-white" />
+              <span className="absolute inset-y-0 left-1/2 w-[2px] -translate-x-1/2 bg-violet" />
             )}
           </button>
         );

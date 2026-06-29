@@ -1,9 +1,11 @@
 export default function LoadingOverlay() {
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-gray-950 bg-opacity-80">
-      <div className="text-center">
-        <div className="mb-3 h-10 w-10 animate-spin rounded-full border-4 border-gray-600 border-t-blue-500 mx-auto" />
-        <p className="text-sm text-gray-400">Loading Austin traffic data…</p>
+    <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center">
+      <div className="flex flex-col items-center gap-3 rounded-2xl border border-stone bg-surface/95 px-7 py-6 shadow-float backdrop-blur">
+        <div className="h-9 w-9 animate-spin rounded-full border-[3px] border-stone border-t-violet" />
+        <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-ink-soft">
+          Loading Austin traffic
+        </p>
       </div>
     </div>
   );

@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react';
 import { fetchDayPrediction } from '../services/trafficService';
 
+// Silently re-poll so the day card reflects the self-updater's new model.
+const REFRESH_MS = 3 * 60 * 1000;
+
 /**
  * Fetch whole-day predicted congestion for a date ("YYYY-MM-DD"), or nothing
  * when `date` is null (default mode). Returns the geometry, per-hour metadata,
- * the congestion-index matrix, and load state.
+ * the congestion-index matrix, and load state. Re-polls silently so the panel
+ * tracks background model updates without a reload.
  *
  * @param {string | null} date
  */
@@ -22,26 +26,34 @@ export function useDayPrediction(date) {
     }
 
     let cancelled = false;
-    setLoading(true);
-    fetchDayPrediction(date)
-      .then((res) => {
-        if (!cancelled) {
-          setData(res);
-          setError(null);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setData(null);
-          setError(err?.message ?? 'Failed to load day prediction');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
 
+    // silent=true keeps the current data/loading state so a background refresh
+    // never flashes the skeleton or blanks the card on a transient error.
+    const load = (silent) => {
+      if (!silent) setLoading(true);
+      fetchDayPrediction(date)
+        .then((res) => {
+          if (!cancelled) {
+            setData(res);
+            setError(null);
+          }
+        })
+        .catch((err) => {
+          if (!cancelled && !silent) {
+            setData(null);
+            setError(err?.message ?? 'Failed to load day prediction');
+          }
+        })
+        .finally(() => {
+          if (!cancelled && !silent) setLoading(false);
+        });
+    };
+
+    load(false);
+    const id = setInterval(() => load(true), REFRESH_MS);
     return () => {
       cancelled = true;
+      clearInterval(id);
     };
   }, [date]);
 

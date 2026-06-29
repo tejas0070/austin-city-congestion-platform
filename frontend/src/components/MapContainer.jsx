@@ -24,7 +24,7 @@ import {
   incidentRows,
 } from '../utils/mapTooltips';
 
-const SIDEBAR_WIDTH_PX = 320;
+// The kepler canvas fills the whole screen; the sidebar console floats over it.
 const MAP_ID = 'austin_traffic_map';
 
 const CARTO_DARK = {
@@ -110,6 +110,48 @@ const CORRIDOR_TOOLTIP_INTERACTION = {
     enabled: true,
   },
 };
+
+// Humanize a raw column id into a Title Case label for the kepler legend
+// (e.g. "congestion_index" → "Congestion Index", "severity" → "Severity").
+function humanizeFieldName(name) {
+  return name
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Give every processed-dataset field a humanized `displayName` so the kepler
+// legend reads "Congestion Index" instead of the raw binding column name. The
+// field `name` (kepler's lookup key) is left untouched; only the label changes.
+// kepler resolves a layer's colorField to the dataset's field object by name
+// (vis-state-merger.validateSavedVisualChannels), so the displayName set here
+// is what the legend renders.
+function withFormattedFieldNames(data) {
+  if (!data?.fields) return data;
+  return {
+    ...data,
+    fields: data.fields.map((field) => ({
+      ...field,
+      displayName: humanizeFieldName(field.displayName || field.name),
+    })),
+  };
+}
+
+// Build a kepler dataset entry from a FeatureCollection, returning null when
+// processGeojson can't produce a valid table — e.g. features are present but
+// their geometry is missing/unsupported after the tooltip transforms. Handing
+// kepler a null `data` makes validateInputData fail and raises its top-right
+// "Failed to create a new dataset due to data verification errors" toast, so
+// callers must skip a null entry rather than push it.
+function geojsonDataset(id, label, fc) {
+  const data = processGeojson(fc);
+  if (!data) {
+    console.warn(`[map] skipping dataset "${id}": no usable geometry to render`);
+    return null;
+  }
+  return { info: { id, label }, data: withFormattedFieldNames(data) };
+}
 
 function corridorLineLayer(id, dataId, label, isVisible, field = 'congestion_index') {
   return {
@@ -239,6 +281,8 @@ export default function MapContainer({
   const loadedPreviewDateRef = useRef(null);
   // Whether the (date-filtered) events dataset is currently loaded.
   const eventsLoadedRef = useRef(false);
+  // Whether the incidents dataset/layer is currently loaded.
+  const incidentsLoadedRef = useRef(false);
 
   // Events relevant to the current view: the previewed day, or today + next 48h
   // on the live map. Recomputed when the feed or the viewed date changes.
@@ -257,6 +301,21 @@ export default function MapContainer({
 
   const keplerMapState = useSelector((state) => state.keplerGl?.[MAP_ID]?.mapState);
   const keplerLayers = useSelector((state) => state.keplerGl?.[MAP_ID]?.visState?.layers);
+  // Current basemap style. Toggling Predicted runs another addDataToMap, which
+  // resets kepler's map style off our custom CARTO dark basemap to its default
+  // (a blank/white canvas). We watch this and snap it back.
+  const keplerStyleType = useSelector((state) => state.keplerGl?.[MAP_ID]?.mapStyle?.styleType);
+
+  // Keep the CARTO dark basemap pinned. Anything that resets kepler's map style
+  // — the init gate not having run, a hot-reload, or the addDataToMap that
+  // creates the Predicted layer — would otherwise leave a blank/white canvas.
+  // Snapping styleType back makes the dark basemap self-healing, so the map can
+  // never get stuck white. Re-asserting the same style is a no-op, so no loop.
+  useEffect(() => {
+    if (keplerStyleType === 'carto_dark_matter') return;
+    dispatch(inputMapStyle(CARTO_DARK));
+    dispatch(mapStyleChange('carto_dark_matter'));
+  }, [keplerStyleType, dispatch]);
   // Reactive "base map is up" flag (live layer exists). Stable boolean, so an
   // effect depending on it fires once on init rather than on every layer change.
   const isInitialized = useSelector((state) =>
@@ -311,26 +370,28 @@ export default function MapContainer({
   useEffect(() => {
     if (!corridors?.features?.length) return;
 
-    const datasets = [];
-    const initialLayers = [];
+    // Live is the dataset the map is gated on; if it can't be processed there is
+    // nothing to show yet, so bail and let the next poll retry rather than
+    // initialising kepler with an empty/invalid dataset.
+    const live = geojsonDataset(DATA.live, 'Live Traffic', withLiveTooltips(corridors));
+    if (!live) return;
 
-    datasets.push({ info: { id: DATA.live, label: 'Live Traffic' }, data: processGeojson(withLiveTooltips(corridors)) });
-    initialLayers.push(corridorLineLayer(LAYER.live, DATA.live, 'Live Traffic', true));
+    const datasets = [live];
+    const initialLayers = [corridorLineLayer(LAYER.live, DATA.live, 'Live Traffic', true)];
 
-    const hasPredicted = corridorsPredicted?.features?.length > 0;
-    if (hasPredicted) {
-      datasets.push({ info: { id: DATA.predicted, label: 'Predicted +2h (ML)' }, data: processGeojson(withPredictedTooltips(corridorsPredicted)) });
+    const predicted = corridorsPredicted?.features?.length
+      ? geojsonDataset(DATA.predicted, 'Predicted +2h (ML)', withPredictedTooltips(corridorsPredicted))
+      : null;
+    if (predicted) {
+      datasets.push(predicted);
       initialLayers.push(corridorLineLayer(LAYER.predicted, DATA.predicted, 'Predicted +2h (ML)', false));
     }
 
-    // Events are owned by the dedicated date-filtered effect below (they depend
-    // on the viewed date), so they are intentionally not loaded here.
-
-    const rows = incidentRows(incidents);
-    if (rows.length > 0) {
-      datasets.push({ info: { id: DATA.incidents, label: 'Incidents' }, data: processRowObject(rows) });
-      initialLayers.push(INCIDENTS_LAYER);
-    }
+    // Events and Incidents are owned by dedicated effects below. Incidents in
+    // particular arrives in its own render (a separate fetch), so loading it
+    // here would only create its icon layer on the lucky races where it beat the
+    // big corridors fetch. The dedicated effect creates the layer whenever the
+    // incidents feed shows up, so the icons are always present.
 
     if (!initializedRef.current) {
       dispatch(inputMapStyle(CARTO_DARK));
@@ -353,14 +414,21 @@ export default function MapContainer({
       // ignores the config mapState on cold start).
       dispatch(updateMap(AUSTIN_VIEWPORT));
       initializedRef.current = true;
-      predictedCreatedRef.current = hasPredicted;
+      // Only mark Predicted as created if it was actually added above; if its
+      // data was missing/invalid, the dedicated effect below retries it.
+      predictedCreatedRef.current = Boolean(predicted);
     } else {
       // The Predicted dataset is owned by the dedicated effect below so a poll
       // refresh never clobbers an active day-preview hour.
+      // updateVisData takes POSITIONAL args (datasets, options) — passing a
+      // single { datasets, options } object makes kepler treat that wrapper as a
+      // dataset with undefined data, which fails validation and raises the
+      // "Failed to create a new dataset due to data verification errors" toast
+      // on every poll (and skips the real refresh).
       const pollDatasets = datasets.filter((d) => d.info.id !== DATA.predicted);
-      dispatch(updateVisData({ datasets: pollDatasets, options: { centerMap: false } }));
+      dispatch(updateVisData(pollDatasets, { centerMap: false }));
     }
-  }, [liveTraffic, corridors, corridorsPredicted, incidents, dispatch]);
+  }, [liveTraffic, corridors, corridorsPredicted, dispatch]);
 
   // Create the styled +2h Predicted layer once its data is available (it usually
   // arrives after the initial addDataToMap). Row data can't be updated in place,
@@ -368,11 +436,10 @@ export default function MapContainer({
   useEffect(() => {
     if (!initializedRef.current || predictedCreatedRef.current) return;
     if (!corridorsPredicted?.features?.length) return;
+    const predicted = geojsonDataset(DATA.predicted, 'Predicted +2h (ML)', withPredictedTooltips(corridorsPredicted));
+    if (!predicted) return; // retry on the next feed rather than toast
     dispatch(addDataToMap({
-      datasets: [{
-        info: { id: DATA.predicted, label: 'Predicted +2h (ML)' },
-        data: processGeojson(withPredictedTooltips(corridorsPredicted)),
-      }],
+      datasets: [predicted],
       // keepExistingConfig:true is REQUIRED. Without it, addDataToMap runs
       // resetMapConfigUpdater and wipes every existing layer, rebuilding only
       // this one — blanking the live/events/incidents layers.
@@ -436,13 +503,44 @@ export default function MapContainer({
 
     if (!mapEvents?.features?.length) return;
 
+    const eventsDataset = geojsonDataset(DATA.events, 'Events', withEventTooltips(mapEvents));
+    if (!eventsDataset) return;
+
     dispatch(addDataToMap({
-      datasets: [{ info: { id: DATA.events, label: 'Events' }, data: processGeojson(withEventTooltips(mapEvents)) }],
+      datasets: [eventsDataset],
       options: { centerMap: false, readOnly: true, autoCreateLayers: false, keepExistingConfig: true },
       config: { visState: { layers: [EVENTS_LAYER] } },
     }));
     eventsLoadedRef.current = true;
   }, [mapEvents, isInitialized, dispatch]);
+
+  // Load / refresh the Incidents dataset + icon layer once the map is up. The
+  // incidents feed arrives in its own render (a separate fetch), so owning it in
+  // a dedicated effect — rather than the corridors-gated init effect — means the
+  // icon layer is created whenever incidents show up, regardless of which feed
+  // wins the load race. Row data can't update in place, so each refresh
+  // remove + re-adds; keepExistingConfig:true keeps the other layers intact.
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    if (incidentsLoadedRef.current) {
+      dispatch(removeDataset(DATA.incidents));
+      incidentsLoadedRef.current = false;
+    }
+
+    const rows = incidentRows(incidents);
+    if (rows.length === 0) return;
+
+    const incidentsData = processRowObject(rows);
+    if (!incidentsData) return;
+
+    dispatch(addDataToMap({
+      datasets: [{ info: { id: DATA.incidents, label: 'Incidents' }, data: withFormattedFieldNames(incidentsData) }],
+      options: { centerMap: false, readOnly: true, autoCreateLayers: false, keepExistingConfig: true },
+      config: { visState: { layers: [INCIDENTS_LAYER] } },
+    }));
+    incidentsLoadedRef.current = true;
+  }, [incidents, isInitialized, dispatch]);
 
   // Load (or swap) the day-preview dataset when a day is selected. The dataset
   // carries all 24 hours as columns; selecting a new day re-loads it (row data
@@ -460,11 +558,14 @@ export default function MapContainer({
 
     if (!dayFC?.features?.length || loadedPreviewDateRef.current === previewDate) return;
 
+    const dayDataset = geojsonDataset(DATA.dayPreview, 'Day Preview', withDayTooltips(dayFC));
+    if (!dayDataset) return;
+
     if (loadedPreviewDateRef.current !== null) {
       dispatch(removeDataset(DATA.dayPreview));
     }
     dispatch(addDataToMap({
-      datasets: [{ info: { id: DATA.dayPreview, label: 'Day Preview' }, data: processGeojson(withDayTooltips(dayFC)) }],
+      datasets: [dayDataset],
       // keepExistingConfig:true is REQUIRED — see the Predicted effect above.
       // Without it, selecting a day resets the whole map to just this layer.
       options: { centerMap: false, readOnly: true, autoCreateLayers: false, keepExistingConfig: true },
@@ -518,11 +619,11 @@ export default function MapContainer({
   }, [layers, keplerLayers, previewDate, dispatch]);
 
   return (
-    <div className="relative flex-1 h-full">
+    <div className="absolute inset-0 h-full w-full">
       <KeplerGl
         id={MAP_ID}
         mapboxApiAccessToken=""
-        width={window.innerWidth - SIDEBAR_WIDTH_PX}
+        width={window.innerWidth}
         height={window.innerHeight}
       />
       {/* Cover kepler's default "add data / upload" empty state during the
@@ -533,8 +634,8 @@ export default function MapContainer({
           className="absolute inset-0 flex items-center justify-center bg-[#0b0b0d]"
         >
           <div className="flex flex-col items-center gap-3 text-gray-300">
-            <span className="h-8 w-8 animate-spin rounded-full border-2 border-gray-700 border-t-blue-500" />
-            <p className="text-sm font-medium tracking-wide">Loading Austin traffic…</p>
+            <span className="h-8 w-8 animate-spin rounded-full border-2 border-gray-700 border-t-violet" />
+            <p className="font-mono text-xs uppercase tracking-[0.2em] text-gray-400">Loading Austin traffic…</p>
           </div>
         </div>
       )}

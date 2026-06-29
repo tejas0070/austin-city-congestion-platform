@@ -57,3 +57,6 @@ dev.db
 
 # Alembic pycache
 alembic/versions/__pycache__/
+
+# TomTom runtime budget counter (daily state, not an artifact)
+data/models/tomtom_usage.json

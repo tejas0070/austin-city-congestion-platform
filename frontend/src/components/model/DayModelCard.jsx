@@ -59,11 +59,11 @@ export default function DayModelCard({ day }) {
 
   if (loading && hours.length === 0) {
     return (
-      <div className="rounded-xl border border-gray-700 bg-gray-900 p-3.5">
-        <div className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+      <div className="rounded-xl border border-stone bg-surface-hi p-3.5">
+        <div className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-faint">
           Day · {dayLabel(date)}
         </div>
-        <div className="h-28 animate-pulse rounded bg-gray-800" />
+        <div className="h-28 animate-pulse rounded bg-stone-soft" />
       </div>
     );
   }
@@ -82,8 +82,8 @@ export default function DayModelCard({ day }) {
   const hasConfidence = typeof confidenceAvg === 'number';
 
   return (
-    <div className="rounded-xl border border-gray-700 bg-gray-900 p-3.5">
-      <div className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+    <div className="rounded-xl border border-stone bg-surface-hi p-3.5">
+      <div className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-faint">
         Day · {dayLabel(date)}
       </div>
 
@@ -102,7 +102,7 @@ export default function DayModelCard({ day }) {
         emptyNote="Confidence unavailable for this forecast."
       />
 
-      <div className="my-3.5 h-px bg-gray-700" />
+      <div className="my-3.5 h-px bg-stone" />
 
       <MetricReadout
         marker="▮"

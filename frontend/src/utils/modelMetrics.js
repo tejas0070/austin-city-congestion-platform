@@ -19,7 +19,7 @@ export function weekBounds(dateISO) {
 
 // Confidence is drawn in BLUE so it never competes with the green/yellow/red
 // traffic ramp. A single hue keeps "this is the confidence metric" unambiguous.
-export const CONFIDENCE_COLOR = '#3B82F6';
+export const CONFIDENCE_COLOR = '#6B5B95';
 
 // Congestion level -> hex, matching the map's congestion ramp.
 const CONGESTION_LEVEL_COLOR = {

@@ -9,7 +9,8 @@
     "precipitation_in",
     "dist_downtown_km",
     "nearby_event_attendance",
-    "base_pattern"
+    "base_pattern",
+    "seasonal_level"
   ],
   "categorical_features": [
     "road_class"
@@ -25,21 +26,34 @@
     "dist_downtown_km",
     "nearby_event_attendance",
     "base_pattern",
+    "seasonal_level",
     "road_class"
   ],
   "target": "congestion_pct",
   "model_type": "HistGradientBoostingRegressor",
-  "test_mae": 10.999,
-  "test_r2": 0.1988,
-  "training_rows": 120000,
+  "test_mae": 7.169,
+  "test_r2": 0.5438,
+  "training_rows": 277390,
   "interval": {
     "lower_quantile": 0.1,
     "upper_quantile": 0.9,
     "nominal_coverage": 0.8
   },
-  "empirical_coverage": 0.8982,
+  "empirical_coverage": 0.901,
+  "confidence_interval": {
+    "lower_quantile": 0.25,
+    "upper_quantile": 0.75
+  },
+  "confidence_interval_coverage": 0.4721,
   "width_anchors": {
-    "p5": 21.953,
-    "p95": 52.853
-  }
+    "p5": 3.184,
+    "p95": 28.276
+  },
+  "confidence_anchors": {
+    "full": 8.0,
+    "zero": 45.0
+  },
+  "confidence_mean": 84.4,
+  "confidence_pct_high": 69.0,
+  "data_source": "City of Austin Bluetooth travel sensors (real)"
 }

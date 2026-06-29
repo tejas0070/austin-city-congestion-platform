@@ -12,5 +12,19 @@ html, body, #root {
   margin: 0;
   padding: 0;
   overflow: hidden;
+  /* Dark behind the map during cold-start so there's no light flash before
+     the basemap paints. The chrome that floats over the map is light. */
   background-color: #0d1117;
+}
+
+body {
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Tabular figures for telemetry/data set in the mono face, so numbers don't
+   jitter as they tick. */
+.font-mono {
+  font-variant-numeric: tabular-nums;
 }

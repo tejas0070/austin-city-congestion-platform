@@ -49,7 +49,7 @@ LOCATIONS_URL = "https://data.austintexas.gov/resource/6yd9-yz29.json"
 OUT_PATH = Path(__file__).resolve().parents[1] / "data" / "training" / "congestion_history.csv"
 EVENTS_PATH = Path(__file__).resolve().parents[1] / "data" / "events" / "austin_major_events.csv"
 
-MAX_READINGS = 120_000          # cap rows pulled (keeps ETL + CSV bounded)
+MAX_READINGS = int(os.environ.get("REAL_MAX_READINGS", "120000"))  # cap rows pulled
 PAGE = 50_000                   # Socrata page size
 # Minimum Bluetooth matches per 15-min reading. Low-sample readings (especially
 # overnight, where avg samples drop below 1) are a single noisy match and read
@@ -113,20 +113,38 @@ def _fetch_locations() -> tuple[dict, dict]:
 
 
 def _fetch_tmsr() -> list[dict]:
+    import time
+
     rows: list[dict] = []
+    params_base = {
+        "$select": "origin_reader_identifier,origin_roadway,origin_cross_street,"
+                   "average_speed_mph,number_samples,timestamp",
+        "$where": f"average_speed_mph IS NOT NULL AND number_samples >= {MIN_SAMPLES}",
+        # Most-recent-first: the sensor network grew over the years, so recent
+        # data has far more corridors (and is more representative).
+        "$order": "timestamp DESC",
+        "$limit": PAGE,
+    }
     with httpx.Client(timeout=120.0) as c:
         offset = 0
         while len(rows) < MAX_READINGS:
-            resp = c.get(TMSR_URL, params={
-                "$select": "origin_reader_identifier,origin_roadway,origin_cross_street,"
-                           "average_speed_mph,number_samples,timestamp",
-                "$where": f"average_speed_mph IS NOT NULL AND number_samples >= {MIN_SAMPLES}",
-                "$order": "timestamp",
-                "$limit": PAGE,
-                "$offset": offset,
-            }, headers=_headers())
-            resp.raise_for_status()
-            batch = resp.json()
+            # Retry each page on transient network drops (the big pull is flaky).
+            batch = None
+            for attempt in range(4):
+                try:
+                    resp = c.get(TMSR_URL, params={**params_base, "$offset": offset},
+                                 headers=_headers())
+                    resp.raise_for_status()
+                    batch = resp.json()
+                    break
+                except Exception as exc:  # noqa: BLE001 - retry transient errors
+                    if attempt == 3:
+                        if rows:
+                            print(f"  [warn] page at offset {offset} failed after retries "
+                                  f"({exc}); proceeding with {len(rows)} rows.")
+                            return rows[:MAX_READINGS]
+                        raise
+                    time.sleep(3 * (attempt + 1))
             if not batch:
                 break
             rows.extend(batch)
@@ -260,6 +278,7 @@ def main() -> int:
             events,
         )
         feat[TARGET_COLUMN] = congestion_pct_from_speed(speed, ff)
+        feat["_segment_id"] = seg["segment_id"]
         rows_out.append(feat)
 
     print(f"  built {len(rows_out)} rows, skipped {skipped} (reasons: {skip_reasons})")
@@ -267,10 +286,15 @@ def main() -> int:
         print("[ERROR] No rows built — check the reader/location join.")
         return 1
 
-    df = pd.DataFrame(rows_out)[FEATURE_ORDER + [TARGET_COLUMN]]
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(OUT_PATH, index=False)
-    print(f"Wrote {len(df):,} rows -> {OUT_PATH}")
+    # Cache the (static) Bluetooth rows so retrains don't have to re-pull them,
+    # then finalize over ALL real sources (Bluetooth + radar + TomTom).
+    bt = pd.DataFrame(rows_out)[FEATURE_ORDER + [TARGET_COLUMN, "_segment_id"]]
+    bt_path = OUT_PATH.parent / "_bluetooth_rows.csv"
+    bt.to_csv(bt_path, index=False)
+    print(f"  cached {len(bt):,} Bluetooth rows -> {bt_path.name}")
+
+    from backend.etl.training_finalize import finalize
+    finalize()
     return 0
 
 

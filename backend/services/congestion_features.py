@@ -65,6 +65,13 @@ NUMERIC_FEATURES: list[str] = [
     "dist_downtown_km",
     "nearby_event_attendance",
     "base_pattern",
+    # Data-driven autoregressive prior: this segment's REAL typical congestion at
+    # this hour-of-week, learned from history. It carries segment-specific signal
+    # the formula-based base_pattern cannot, which sharpens predictions (and thus
+    # tightens the confidence interval) where real history exists. At predict time
+    # it is supplied from a seasonal-prior lookup; in training it is the segment's
+    # observed hour-of-week mean. Falls back to base_pattern when unknown.
+    "seasonal_level",
 ]
 CATEGORICAL_FEATURES: list[str] = ["road_class"]
 FEATURE_ORDER: list[str] = NUMERIC_FEATURES + CATEGORICAL_FEATURES
@@ -177,11 +184,16 @@ def build_feature_row(
     temperature_f: float,
     precipitation_in: float,
     events: list[dict],
+    seasonal_level: float | None = None,
 ) -> dict:
     """Construct one model feature row for a segment at a given time.
 
     `segment` must provide: road_class, centroid_lat, centroid_lng, dist_downtown_km.
+    `seasonal_level` is the segment's data-driven typical congestion for this
+    hour-of-week; when None it falls back to the formula-based base_pattern so the
+    feature is always populated.
     """
+    base = round(base_pattern(segment["road_class"], segment["dist_downtown_km"], dt), 3)
     return {
         "hour": dt.hour,
         "day_of_week": dt.weekday(),
@@ -194,8 +206,7 @@ def build_feature_row(
         "nearby_event_attendance": nearby_event_attendance(
             segment["centroid_lat"], segment["centroid_lng"], dt, events
         ),
-        "base_pattern": round(
-            base_pattern(segment["road_class"], segment["dist_downtown_km"], dt), 3
-        ),
+        "base_pattern": base,
+        "seasonal_level": base if seasonal_level is None else round(float(seasonal_level), 3),
         "road_class": segment["road_class"],
     }

@@ -1,3 +1,5 @@
+const path = require('path');
+
 module.exports = {
   webpack: {
     configure: (webpackConfig) => {
@@ -16,11 +18,36 @@ module.exports = {
         tls: false,
       };
 
+      // kepler.gl runs addDataToMap's dataset creation through react-palm
+      // "tasks". The task middleware is installed from @kepler.gl/reducers'
+      // copy of react-palm, but CREATE_TABLE_TASK is constructed in
+      // @kepler.gl/table's copy. Each @kepler.gl/* package nests its OWN
+      // react-palm (there is no hoisted top-level one), so a task created by one
+      // copy isn't recognised by the middleware from another. The unrecognised
+      // create-table task is then dropped, and kepler raises an intermittent
+      // "Failed to create a new dataset due to data verification errors" toast
+      // for whichever dataset lost the race (the data itself is always valid).
+      // Aliasing react-palm to a single copy makes task identity consistent so
+      // every create-table task runs. All @kepler.gl/* peers pin ^3.3.8, so one
+      // shared copy is exactly what they expect.
+      const reactPalm = path.dirname(
+        require.resolve('react-palm/package.json', {
+          paths: [path.resolve(__dirname, 'node_modules/@kepler.gl/reducers')],
+        })
+      );
+
       // Route all mapbox-gl imports (including kepler.gl internals) through
       // maplibre-gl — avoids Mapbox token requirements entirely.
       webpackConfig.resolve.alias = {
         ...webpackConfig.resolve.alias,
         'mapbox-gl': 'maplibre-gl',
+        // Single shared react-palm (see comment above). Matches `react-palm`
+        // and its subpaths (`react-palm/tasks`, `react-palm/actions`, …).
+        'react-palm': reactPalm,
+        // shadcn-style absolute imports: `@/components/ui/...` -> `src/...`.
+        // Only matches requests beginning with `@/`, so scoped packages such as
+        // `@kepler.gl/*` are unaffected.
+        '@': path.resolve(__dirname, 'src'),
       };
 
       // kepler.gl ships .cjs files; webpack 5 asset modules treat unknown

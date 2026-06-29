@@ -103,24 +103,47 @@ def main() -> int:
             )),
         ])
 
-    print("Training quantile models (q10, q90) ...")
+    import numpy as np
+
+    # Wide 80% interval (q10/q90): used ONLY to report the accuracy badge — how
+    # often the model's prediction range actually contains the real value.
+    print("Training 80% interval models (q10, q90) for the accuracy badge ...")
     q10_model = _make_quantile_model(0.10).fit(x_train, y_train)
     q90_model = _make_quantile_model(0.90).fit(x_train, y_train)
+    lo80 = np.minimum(q10_model.predict(x_test), q90_model.predict(x_test))
+    hi80 = np.maximum(q10_model.predict(x_test), q90_model.predict(x_test))
+    coverage = float(((y_test >= lo80) & (y_test <= hi80)).mean())
+    print(f"  80% interval coverage (accuracy badge): {coverage:.3f}")
 
-    low = q10_model.predict(x_test)
-    high = q90_model.predict(x_test)
-    import numpy as np
-    lo = np.minimum(low, high)
-    hi = np.maximum(low, high)
+    # Tight central 50% interval (q25/q75): this is what is SERVED for the
+    # per-road confidence signal. A good model's central band is narrow, so this
+    # reads as high confidence where the model predicts well, and low where it
+    # genuinely cannot — without overstating an 80% band.
+    print("Training 50% interval models (q25, q75) for the confidence signal ...")
+    q25_model = _make_quantile_model(0.25).fit(x_train, y_train)
+    q75_model = _make_quantile_model(0.75).fit(x_train, y_train)
+    lo = np.minimum(q25_model.predict(x_test), q75_model.predict(x_test))
+    hi = np.maximum(q25_model.predict(x_test), q75_model.predict(x_test))
     widths = np.clip(hi, 0, 100) - np.clip(lo, 0, 100)
-    coverage = float(((y_test >= lo) & (y_test <= hi)).mean())
+    coverage50 = float(((y_test >= lo) & (y_test <= hi)).mean())
     w_low = float(np.percentile(widths, 5))
     w_high = float(np.percentile(widths, 95))
-    print(f"  Interval coverage (target ~0.80): {coverage:.3f}")
-    print(f"  Width anchors (p5/p95): {w_low:.2f} / {w_high:.2f}")
+    print(f"  50% interval coverage: {coverage50:.3f}")
+    print(f"  Width percentiles (p5/p50/p95): {w_low:.1f} / {np.percentile(widths,50):.1f} / {w_high:.1f}")
 
-    joblib.dump({"q10": q10_model, "q90": q90_model}, QUANTILES_PATH)
-    print(f"Saved quantile models to {QUANTILES_PATH}")
+    # Confidence under the deployed ABSOLUTE anchors (what the UI actually shows).
+    from backend.etl.confidence import absolute_width_anchors, width_to_confidence
+    a_low, a_high = absolute_width_anchors()
+    conf = np.array([width_to_confidence(float(w), a_low, a_high) for w in widths])
+    mean_conf = float(conf.mean())
+    pct_high = float((conf >= 80).mean() * 100)
+    print(f"  Confidence (absolute anchors {a_low}/{a_high}): mean {mean_conf:.1f}%, "
+          f"{pct_high:.0f}% of segments >= 80%")
+
+    # Serve the 50% band for per-road confidence. Keys stay low/high so the
+    # predictor is agnostic to which quantiles back the band.
+    joblib.dump({"low": q25_model, "high": q75_model}, QUANTILES_PATH)
+    print(f"Saved confidence (50% interval) models to {QUANTILES_PATH}")
 
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
@@ -133,9 +156,17 @@ def main() -> int:
         "test_mae": round(float(mae), 3),
         "test_r2": round(float(r2), 4),
         "training_rows": int(len(df)),
+        # Accuracy badge: the wide 80% interval's empirical coverage.
         "interval": {"lower_quantile": 0.10, "upper_quantile": 0.90, "nominal_coverage": 0.80},
         "empirical_coverage": round(coverage, 4),
+        # Confidence signal: the tight central 50% interval mapped via fixed anchors.
+        "confidence_interval": {"lower_quantile": 0.25, "upper_quantile": 0.75},
+        "confidence_interval_coverage": round(coverage50, 4),
         "width_anchors": {"p5": round(w_low, 3), "p95": round(w_high, 3)},
+        "confidence_anchors": {"full": a_low, "zero": a_high},
+        "confidence_mean": round(mean_conf, 1),
+        "confidence_pct_high": round(pct_high, 1),
+        "data_source": "City of Austin Bluetooth travel sensors (real)",
     }, indent=2), encoding="utf-8")
 
     CARD_PATH.parent.mkdir(parents=True, exist_ok=True)

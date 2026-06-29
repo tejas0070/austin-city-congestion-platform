@@ -14,7 +14,12 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
-from ..etl.confidence import clamp_interval, confidence_label, width_to_confidence
+from ..etl.confidence import (
+    absolute_width_anchors,
+    clamp_interval,
+    confidence_label,
+    width_to_confidence,
+)
 from ..utils.cache import get_cache, set_cache
 from ..utils.geojson_builder import build_feature_collection, build_line_feature
 from .congestion_features import (
@@ -28,6 +33,7 @@ from .segments_service import load_segments
 MODEL_PATH = Path(__file__).resolve().parents[2] / "data" / "models" / "congestion_model.pkl"
 META_PATH = Path(__file__).resolve().parents[2] / "data" / "models" / "model_meta.json"
 QUANTILES_PATH = Path(__file__).resolve().parents[2] / "data" / "models" / "congestion_quantiles.pkl"
+SEASONAL_PRIOR_PATH = Path(__file__).resolve().parents[2] / "data" / "models" / "seasonal_prior.json"
 
 _PREDICTION_CACHE_TTL = 90  # seconds
 _DAY_CACHE_TTL = 900  # 15 min — long enough to amortize 24 predictions, short
@@ -35,7 +41,54 @@ _DAY_CACHE_TTL = 900  # 15 min — long enough to amortize 24 predictions, short
 _DEFAULT_ATTENDANCE = 5000  # for events with no reported attendance
 
 _model = None  # lazy-loaded singleton
-_quantiles = None  # lazy-loaded {"q10": pipe, "q90": pipe}
+_quantiles = None  # lazy-loaded {"low": pipe, "high": pipe}
+_seasonal_prior = None  # lazy-loaded {"by_segment":..., "by_road_class":..., "global":...}
+# Artifact modification times at load — used to hot-reload after a retrain so the
+# running API picks up the self-updater's new model without a restart.
+_mtimes: dict[str, float] = {}
+
+
+def _file_changed(path) -> bool:
+    """True if `path` exists and its mtime differs from when we last loaded it."""
+    if not path.exists():
+        return False
+    mtime = path.stat().st_mtime
+    if _mtimes.get(str(path)) != mtime:
+        _mtimes[str(path)] = mtime
+        return True
+    return False
+
+
+def _load_seasonal_prior() -> dict:
+    """Load the seasonal-prior artifact (real per-segment hour-of-week congestion).
+
+    Returns an empty structure when the artifact is absent, so predictions fall
+    back to the formula-based base_pattern for `seasonal_level`.
+    """
+    global _seasonal_prior
+    if _seasonal_prior is None or _file_changed(SEASONAL_PRIOR_PATH):
+        if SEASONAL_PRIOR_PATH.exists():
+            _seasonal_prior = json.loads(SEASONAL_PRIOR_PATH.read_text(encoding="utf-8"))
+        else:
+            _seasonal_prior = {"by_segment": {}, "by_road_class": {}, "global": None}
+    return _seasonal_prior
+
+
+def _seasonal_level_for(segment: dict, target_dt: datetime) -> float | None:
+    """Resolve a segment's typical congestion for this hour-of-week from the prior.
+
+    Tier 1: this exact segment's history. Tier 2: its road-class average.
+    Tier 3: the global mean. None → build_feature_row falls back to base_pattern.
+    """
+    prior = _load_seasonal_prior()
+    key = f"{target_dt.hour}_{1 if target_dt.weekday() >= 5 else 0}"
+    by_seg = prior.get("by_segment", {}).get(str(segment.get("segment_id")))
+    if by_seg and key in by_seg:
+        return by_seg[key]
+    by_rc = prior.get("by_road_class", {}).get(segment.get("road_class"))
+    if by_rc and key in by_rc:
+        return by_rc[key]
+    return prior.get("global")
 
 
 def model_is_available() -> bool:
@@ -44,12 +97,15 @@ def model_is_available() -> bool:
 
 def _load_model():
     global _model
-    if _model is None:
-        if not MODEL_PATH.exists():
-            raise FileNotFoundError(
-                f"Model not found at {MODEL_PATH}. Run scripts/train_model.py first."
-            )
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(
+            f"Model not found at {MODEL_PATH}. Run scripts/train_model.py first."
+        )
+    if _model is None or _file_changed(MODEL_PATH):
         _model = joblib.load(MODEL_PATH)
+        # A new model invalidates cached predictions from the old one.
+        from ..utils.cache import clear_cache
+        clear_cache()
     return _model
 
 
@@ -65,14 +121,15 @@ def quantiles_are_available() -> bool:
 
 def _load_quantiles():
     global _quantiles
-    if _quantiles is None and QUANTILES_PATH.exists():
+    if QUANTILES_PATH.exists() and (_quantiles is None or _file_changed(QUANTILES_PATH)):
         _quantiles = joblib.load(QUANTILES_PATH)
     return _quantiles
 
 
 def _width_anchors() -> tuple[float, float]:
-    meta = get_model_meta().get("width_anchors", {})
-    return float(meta.get("p5", 5.0)), float(meta.get("p95", 40.0))
+    # Fixed, interpretable anchors (not the model's own width percentiles) so the
+    # confidence score is stable across retrains and improves when the model does.
+    return absolute_width_anchors()
 
 
 def _segment_confidences(rows: list[dict]) -> list[tuple[float, float, float]] | None:
@@ -89,8 +146,9 @@ def _segment_confidences(rows: list[dict]) -> list[tuple[float, float, float]] |
     if quants is None:
         return None
     frame = pd.DataFrame(rows)[FEATURE_ORDER]
-    low_preds = quants["q10"].predict(frame)
-    high_preds = quants["q90"].predict(frame)
+    # Saved as low/high (currently the central 50% band q25/q75).
+    low_preds = quants["low"].predict(frame)
+    high_preds = quants["high"].predict(frame)
     w_low, w_high = _width_anchors()
     out: list[tuple[float, float, float]] = []
     for lo_raw, hi_raw in zip(low_preds, high_preds):
@@ -160,7 +218,10 @@ def _run_predictions(
     if not segments:
         return segments, [], []
     rows = [
-        build_feature_row(seg, target_dt, weather_code, temp_f, precip_in, events)
+        build_feature_row(
+            seg, target_dt, weather_code, temp_f, precip_in, events,
+            seasonal_level=_seasonal_level_for(seg, target_dt),
+        )
         for seg in segments
     ]
     frame = pd.DataFrame(rows)[FEATURE_ORDER]

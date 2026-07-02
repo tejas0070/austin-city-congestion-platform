@@ -1,0 +1,77 @@
+name: Deploy backend to Hugging Face Space
+
+# Mirrors a RUNTIME-ONLY subset of the repo to a Hugging Face Docker Space, which
+# rebuilds on each push. HF's 2 vCPU / 16 GB free tier runs the ML forecast
+# endpoints that Render's 0.1 vCPU could not. Training CSVs are excluded, so all
+# pushed files stay < 10 MB and HF never demands git-LFS.
+#
+# One-time setup (see DEPLOY.md):
+#   1. Create an empty HF Space: New Space -> SDK "Docker".
+#   2. Repo Settings -> Secrets and variables -> Actions:
+#        secret HF_TOKEN   = a HF access token with WRITE role
+#        var    HF_USERNAME = your HF username / org
+#        var    HF_SPACE    = the Space name
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'data/models/**'
+      - 'data/geo/**'
+      - 'requirements.txt'
+      - 'deploy/hf/**'
+      - '.github/workflows/deploy-hf.yml'
+  # Retrain commits are pushed with [skip ci], so ride the retrain workflow's
+  # completion instead to propagate fresh models to HF.
+  workflow_run:
+    workflows: ["Retrain congestion model"]
+    types: [completed]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-hf
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    # When triggered by the retrain workflow, only deploy if it actually succeeded.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Assemble runtime subset (no training data -> no HF LFS)
+        run: |
+          rm -rf hf && mkdir -p hf/data
+          cp -r backend hf/
+          cp -r data/models hf/data/
+          cp -r data/geo hf/data/
+          cp requirements.txt hf/
+          cp deploy/hf/Dockerfile hf/Dockerfile
+          cp deploy/hf/README.md hf/README.md
+          find hf -name '__pycache__' -type d -prune -exec rm -rf {} +
+          find hf -name '*.pyc' -delete
+          echo "=== HF payload ===" && find hf -type f | sort && du -sh hf
+          echo "=== files over 10MB (would need LFS) ===" && find hf -type f -size +10M -exec ls -lh {} \; || true
+
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ vars.HF_USERNAME }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          if [ -z "$HF_TOKEN" ] || [ -z "$HF_USERNAME" ] || [ -z "$HF_SPACE" ]; then
+            echo "::error::Missing config. Set secret HF_TOKEN and vars HF_USERNAME + HF_SPACE."
+            exit 1
+          fi
+          cd hf
+          git init -q -b main
+          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git add -A
+          git commit -qm "sync backend from github@${GITHUB_SHA::7}"
+          git push -f "https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_USERNAME}/${HF_SPACE}.git" main
+          echo "Deployed -> https://$(echo "${HF_USERNAME}-${HF_SPACE}" | tr '[:upper:]' '[:lower:]').hf.space"

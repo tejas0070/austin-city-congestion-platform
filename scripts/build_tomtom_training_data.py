@@ -35,13 +35,33 @@ OUT_PATH = Path(__file__).resolve().parents[1] / "data" / "training" / "_tomtom_
 EVENTS_PATH = Path(__file__).resolve().parents[1] / "data" / "events" / "austin_major_events.csv"
 
 
+def dedup_observations(obs: pd.DataFrame) -> pd.DataFrame:
+    """Keep at most one reading per (segment, date, hour).
+
+    This is the honesty guard for confidence: a segment's per-hour-of-week support
+    (which lifts its density confidence cap) must count DISTINCT observation days,
+    not redundant readings taken minutes apart. Without it, concentrating
+    collection on a corridor could manufacture support — and thus confidence —
+    without adding real knowledge. Rows with an unparseable timestamp are dropped.
+    """
+    dt = pd.to_datetime(obs.get("timestamp"), errors="coerce")
+    kept = obs[dt.notna()].copy()
+    daykey = dt[dt.notna()].dt.strftime("%Y-%m-%dT%H")
+    kept["_daykey"] = daykey.values
+    kept = kept.drop_duplicates(subset=["segment_id", "_daykey"], keep="first")
+    return kept.drop(columns="_daykey")
+
+
 def main() -> int:
     if not OBS_PATH.exists():
         print(f"[ERROR] {OBS_PATH} not found. Run scripts/collect_tomtom_observations.py first.")
         return 1
 
     obs = pd.read_csv(OBS_PATH)
-    print(f"{len(obs):,} TomTom observations, {obs['segment_id'].nunique()} segments")
+    raw_n = len(obs)
+    obs = dedup_observations(obs)
+    print(f"{len(obs):,} TomTom observations ({raw_n - len(obs)} same day+hour "
+          f"duplicates dropped), {obs['segment_id'].nunique()} segments")
 
     seg_by_id = {s["segment_id"]: s for s in load_segments()}
     events = load_curated_events(EVENTS_PATH)

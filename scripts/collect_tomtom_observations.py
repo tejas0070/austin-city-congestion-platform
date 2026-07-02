@@ -21,9 +21,9 @@ from __future__ import annotations
 
 import csv
 import os
-import random
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -34,7 +34,7 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv()  # read TOMTOM_API_KEY from the project .env
 
-from backend.services.segments_service import load_segments  # noqa: E402
+from backend.services.segments_service import load_display_segments  # noqa: E402
 from backend.services.tomtom_service import fetch_flow_segment, tomtom_available  # noqa: E402
 from backend.services.tomtom_budget import reserve, remaining_today, DAILY_LIMIT  # noqa: E402
 
@@ -43,22 +43,84 @@ SAMPLE = int(os.environ.get("TOMTOM_SAMPLE", "400"))
 DELAY = float(os.environ.get("TOMTOM_DELAY", "0.2"))
 FIELDS = ["timestamp", "segment_id", "road_class", "lat", "lng", "congestion_pct", "confidence"]
 
+# Corridors worth building real per-segment diurnal depth on. Concentrating the
+# budget here (rather than sampling the whole city shallowly) is what lets a road
+# accumulate enough real hour-of-week history to honestly leave the confidence
+# fallback cap (backend/etl/confidence.density_confidence_cap).
+PRIORITY_CLASSES = ("motorway", "trunk", "primary")
+PRIORITY_FRACTION = float(os.environ.get("TOMTOM_PRIORITY_FRACTION", "0.8"))
 
-def _sample_segments(segments: list[dict], n: int) -> list[dict]:
-    """Random subset (rotates coverage across runs). Majors are weighted in by
-    listing them twice so corridors get sampled a bit more often."""
-    weighted = list(segments)
-    weighted += [s for s in segments if s["road_class"] in ("motorway", "trunk", "primary")]
-    random.shuffle(weighted)
-    seen, picked = set(), []
-    for s in weighted:
-        if s["segment_id"] in seen:
-            continue
-        seen.add(s["segment_id"])
-        picked.append(s)
-        if len(picked) >= n:
-            break
-    return picked
+
+def _is_weekend(dt: datetime) -> int:
+    return 1 if dt.weekday() >= 5 else 0
+
+
+def log_state(path, now: datetime) -> tuple[dict[str, int], set[str]]:
+    """Read the observation log for depth-ordering + honest dedup.
+
+    Returns (bucket_counts, already_done):
+      * bucket_counts[segment_id] = DISTINCT prior days observed for this run's
+        (hour, is_weekend) bucket — the real depth we already have for this
+        hour-of-week (counted by distinct date, so redundant intra-day readings
+        can never inflate it).
+      * already_done = segments already logged on this exact (date, hour), so this
+        run never adds a second reading to a bucket within the same day. That
+        keeps a bucket's support == distinct observation days, so concentrating
+        collection can't manufacture confidence — only genuine repeat visits
+        across days deepen a road.
+    """
+    path = Path(path)
+    if not path.exists():
+        return {}, set()
+    cur_wk, cur_date, cur_hour = _is_weekend(now), now.date().isoformat(), now.hour
+    bucket_dates: dict[str, set] = defaultdict(set)
+    already_done: set[str] = set()
+    with path.open(encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            ts, sid = row.get("timestamp", ""), row.get("segment_id", "")
+            if not ts or not sid:
+                continue
+            try:
+                dt = datetime.fromisoformat(ts)
+            except ValueError:
+                continue
+            if dt.hour == cur_hour and _is_weekend(dt) == cur_wk:
+                bucket_dates[sid].add(dt.date())
+            if dt.hour == cur_hour and dt.date().isoformat() == cur_date:
+                already_done.add(sid)
+    return {sid: len(dates) for sid, dates in bucket_dates.items()}, already_done
+
+
+def select_segments(
+    segments: list[dict],
+    want: int,
+    *,
+    obs_counts: dict[str, int],
+    already_done: set[str],
+    priority_fraction: float = PRIORITY_FRACTION,
+) -> list[dict]:
+    """Pick up to `want` segments to collect this run.
+
+    Spends `priority_fraction` of the budget deepening the THINNEST-covered
+    priority corridors first (even, representative diurnal depth), then fills the
+    remainder for breadth. Segments already collected this (date, hour) are
+    excluded so support stays a count of distinct days.
+    """
+    if want <= 0:
+        return []
+    pool = [s for s in segments if s["segment_id"] not in already_done]
+
+    def depth(s: dict) -> tuple[int, str]:
+        return obs_counts.get(s["segment_id"], 0), s["segment_id"]
+
+    majors = sorted((s for s in pool if s["road_class"] in PRIORITY_CLASSES), key=depth)
+    others = sorted((s for s in pool if s["road_class"] not in PRIORITY_CLASSES), key=depth)
+
+    n_priority = min(len(majors), round(want * priority_fraction))
+    picked = majors[:n_priority]
+    remainder = majors[n_priority:] + others
+    picked += remainder[: max(0, want - len(picked))]
+    return picked[:want]
 
 
 def main() -> int:
@@ -66,28 +128,43 @@ def main() -> int:
         print("[ERROR] TOMTOM_API_KEY not set. Add it to .env (see script docstring).")
         return 1
 
-    segments = load_segments()
+    segments = load_display_segments()
     if not segments:
         print("[ERROR] No segments. Run scripts/fetch_austin_network.py first.")
         return 1
 
-    # Reserve from the hard daily budget FIRST — never exceed the free tier.
+    # Choose which segments to deepen BEFORE reserving, so budget is spent only on
+    # segments we'll actually collect (dedup can drop some), and depth builds on
+    # the thinnest-covered priority corridors first.
+    now_dt = datetime.now()
+    bucket_counts, already_done = log_state(OUT_PATH, now_dt)
     want = min(SAMPLE, len(segments))
-    granted = reserve(want)
+    candidates = select_segments(
+        segments, want, obs_counts=bucket_counts, already_done=already_done
+    )
+    if not candidates:
+        print("[NOTE] Every candidate segment was already collected this hour; "
+              "nothing new to add. Try a later hour to deepen other buckets.")
+        return 0
+
+    # Reserve from the hard daily budget — never exceed the free tier.
+    granted = reserve(len(candidates))
     if granted <= 0:
         # Exit code 2 signals "budget spent, nothing collected" so the self-updater
         # can skip the redundant retrain (no new data) — but ONLY in this case.
         print(f"[STOP] Daily TomTom budget exhausted ({DAILY_LIMIT}/day). "
               f"Try again tomorrow.")
         return 2
-    if granted < want:
+    if granted < len(candidates):
         print(f"[NOTE] Capping this run to {granted} to stay under the daily budget.")
 
-    sample = _sample_segments(segments, granted)
-    print(f"Sampling {len(sample)} of {len(segments)} segments "
-          f"(reserved {granted}; {remaining_today()} left in today's budget)")
+    sample = candidates[:granted]
+    n_priority = sum(1 for s in sample if s["road_class"] in PRIORITY_CLASSES)
+    print(f"Collecting {len(sample)} segments ({n_priority} priority corridors, "
+          f"deepening thinnest {_is_weekend(now_dt) and 'weekend' or 'weekday'} "
+          f"{now_dt.hour}:00 buckets first; {remaining_today()} left in today's budget)")
 
-    now = datetime.now().isoformat(timespec="minutes")
+    now = now_dt.isoformat(timespec="minutes")
     rows, failures = [], 0
     with httpx.Client(timeout=15.0) as client:
         for seg in sample:

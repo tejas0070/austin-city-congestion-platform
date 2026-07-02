@@ -4,13 +4,18 @@
 These radar detectors sit at ~13 geocoded intersections (see
 scripts/geocode_radar_detectors.py) but carry millions of dense readings, which
 greatly enriches the model's hour/weather/road-class calibration. This script
-pulls a bounded recent sample, derives congestion from speed (vs each detector's
-free-flow), assigns each to the nearest OSM segment, and writes a RAW rows CSV:
+pulls a bounded sample balanced across several PRE-COVID years (2020-2021 traffic
+was atypically light and biases the learned patterns), derives congestion from
+speed (vs each detector's free-flow), assigns each to the nearest OSM segment,
+and writes a RAW rows CSV:
 
     data/training/_radar_rows.csv
 
 `build_real_training_data.py` then concatenates it with the Bluetooth readings
 and computes the shared `seasonal_level` + prior over the combined set.
+
+Env knobs: RADAR_YEARS (default "2017,2018,2019"), RADAR_MAX_READINGS (default
+300000, split evenly across the years).
 
 Run from the project root:
     python scripts/geocode_radar_detectors.py     # once
@@ -45,8 +50,21 @@ LOC_PATH = Path(__file__).resolve().parents[1] / "data" / "geo" / "radar_detecto
 OUT_PATH = Path(__file__).resolve().parents[1] / "data" / "training" / "_radar_rows.csv"
 EVENTS_PATH = Path(__file__).resolve().parents[1] / "data" / "events" / "austin_major_events.csv"
 
-YEAR = int(os.environ.get("RADAR_YEAR", "2021"))   # one valid, dense year
-MAX_READINGS = int(os.environ.get("RADAR_MAX_READINGS", "250000"))
+# The dataset spans 2017-2021. 2020 (COVID lockdown) and 2021 (partial recovery)
+# have atypically light traffic that biases the learned congestion patterns, so
+# the default pulls the PRE-COVID years (2017 partial + full 2018/2019). Override
+# with RADAR_YEARS="2018,2019".
+DEFAULT_RADAR_YEARS = [2017, 2018, 2019]
+
+
+def parse_years(raw: str) -> list[int]:
+    """Parse a comma-separated RADAR_YEARS string; fall back to the pre-COVID set."""
+    years = [int(p) for p in raw.split(",") if p.strip()]
+    return years or list(DEFAULT_RADAR_YEARS)
+
+
+RADAR_YEARS = parse_years(os.environ.get("RADAR_YEARS", ""))
+MAX_READINGS = int(os.environ.get("RADAR_MAX_READINGS", "300000"))  # total, split across years
 PAGE = 50_000
 MIN_VOLUME = 2   # low-volume bins give noisy single-vehicle speeds
 APP_TOKEN = os.environ.get("SOCRATA_APP_TOKEN") or None
@@ -56,32 +74,40 @@ def _headers() -> dict:
     return {"X-App-Token": APP_TOKEN} if APP_TOKEN else {}
 
 
-def _fetch_readings(int_ids: list[str]) -> list[dict]:
+def _fetch_readings(int_ids: list[str], years: list[int]) -> list[dict]:
+    """Pull a balanced sample across `years` (each year gets an equal share of the
+    total cap) so no single year dominates the learned pattern."""
     id_list = ",".join(int_ids)
+    per_year = max(1, MAX_READINGS // len(years))
     rows: list[dict] = []
     with httpx.Client(timeout=120.0) as c:
-        offset = 0
-        while len(rows) < MAX_READINGS:
-            resp = c.get(RADAR_URL, params={
-                "$select": "int_id,detid,speed,volume,year,month,day,hour,minute,day_of_week",
-                "$where": f"int_id in ({id_list}) AND speed > 0 AND volume >= {MIN_VOLUME} "
-                          f"AND year = {YEAR} AND month between 1 and 12 AND hour between 0 and 23",
-                "$order": "month,day,hour,minute",
-                "$limit": PAGE,
-                "$offset": offset,
-            }, headers=_headers())
-            resp.raise_for_status()
-            batch = resp.json()
-            if not batch:
-                break
-            rows.extend(batch)
-            offset += PAGE
-    return rows[:MAX_READINGS]
+        for yr in years:
+            got, offset = 0, 0
+            while got < per_year:
+                resp = c.get(RADAR_URL, params={
+                    "$select": "int_id,detid,speed,volume,year,month,day,hour,minute,day_of_week",
+                    "$where": f"int_id in ({id_list}) AND speed > 0 AND volume >= {MIN_VOLUME} "
+                              f"AND year = {yr}",
+                    "$order": "month,day,hour,minute",
+                    "$limit": min(PAGE, per_year - got),
+                    "$offset": offset,
+                }, headers=_headers())
+                resp.raise_for_status()
+                batch = resp.json()
+                if not batch:
+                    break
+                rows.extend(batch)
+                got += len(batch)
+                offset += len(batch)
+            print(f"  {yr}: {got:,} readings")
+    return rows
 
 
 def _to_dt(r: dict) -> datetime | None:
+    """Date each reading by its OWN year (rows now span multiple years)."""
     try:
-        return datetime(YEAR, int(r["month"]), int(r["day"]), int(r["hour"]), int(r.get("minute", 0)))
+        return datetime(int(r["year"]), int(r["month"]), int(r["day"]),
+                        int(r["hour"]), int(r.get("minute", 0)))
     except (KeyError, ValueError, TypeError):
         return None
 
@@ -98,9 +124,9 @@ def main() -> int:
         print("[ERROR] No segments. Run scripts/fetch_austin_network.py first.")
         return 1
 
-    print(f"Fetching radar readings ({YEAR}) ...")
-    raw = _fetch_readings(list(locations.keys()))
-    print(f"  {len(raw)} readings")
+    print(f"Fetching radar readings for years {RADAR_YEARS} ...")
+    raw = _fetch_readings(list(locations.keys()), RADAR_YEARS)
+    print(f"  {len(raw)} readings total")
     if not raw:
         print("[ERROR] No radar rows returned.")
         return 1
@@ -115,8 +141,8 @@ def main() -> int:
     free_flow = {d: free_flow_speed(s) for d, s in speeds_by_det.items()}
 
     events = load_curated_events(EVENTS_PATH)
-    stamps = [f"{YEAR}-{int(r['month']):02d}-{int(r['day']):02d}" for r in raw
-              if r.get("month") and r.get("day")]
+    stamps = [f"{int(r['year'])}-{int(r['month']):02d}-{int(r['day']):02d}" for r in raw
+              if r.get("year") and r.get("month") and r.get("day")]
     weather = fetch_historical_weather(min(stamps), max(stamps)) if stamps else {}
     print(f"  {len(events)} curated events, {len(weather)} weather hours")
 
@@ -139,7 +165,7 @@ def main() -> int:
         if not ff or seg is None or dt is None:
             skipped += 1
             continue
-        wx_key = f"{YEAR}-{int(r['month']):02d}-{int(r['day']):02d}T{int(r['hour']):02d}"
+        wx_key = f"{int(r['year'])}-{int(r['month']):02d}-{int(r['day']):02d}T{int(r['hour']):02d}"
         wx = weather.get(wx_key[:13], {"weather_code": 0, "temperature_f": 78.0, "precipitation_in": 0.0})
         feat = build_feature_row(
             seg, dt, int(wx["weather_code"]), float(wx["temperature_f"]), float(wx["precipitation_in"]),

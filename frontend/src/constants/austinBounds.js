@@ -1,7 +1,7 @@
 export const AUSTIN_BOUNDS = {
   longitude: -97.7431,
   latitude: 30.2672,
-  zoom: 11,
+  zoom: 11.5,
 };
 
 // Passed to kepler's mapState — must contain only numeric viewport fields.
@@ -10,7 +10,7 @@ export const AUSTIN_BOUNDS = {
 export const AUSTIN_VIEWPORT = {
   longitude: -97.7431,
   latitude: 30.2672,
-  zoom: 11,
+  zoom: 11.5,
   pitch: 0,
   bearing: 0,
 };

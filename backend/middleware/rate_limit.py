@@ -21,6 +21,10 @@ _TRUST_PROXY = os.environ.get("TRUST_PROXY", "false").lower() == "true"
 # ip -> (window_start_epoch, request_count)
 _hits: dict[str, tuple[float, int]] = {}
 
+# Housekeeping is time-gated (at most once per window) rather than size-gated, so
+# a saturated dict can't trigger a full O(n) scan on every request.
+_last_prune: float = 0.0
+
 
 def _client_ip(request: Request) -> str:
     if _TRUST_PROXY:
@@ -55,8 +59,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
         now = time.time()
-        if len(_hits) > 10_000:
+        global _last_prune
+        if now - _last_prune >= _WINDOW_SECONDS:
             _prune(now)
+            _last_prune = now
 
         ip = _client_ip(request)
         allowed, retry_after = _is_allowed(ip, now)

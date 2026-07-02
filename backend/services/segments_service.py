@@ -11,6 +11,7 @@ with the real source keyed on `segment_id` — the GeoJSON contract stays the sa
 from __future__ import annotations
 
 import json
+import os
 import random
 from datetime import datetime
 from pathlib import Path
@@ -28,7 +29,15 @@ NETWORK_PATH = Path(__file__).resolve().parents[2] / "data" / "geo" / "austin_ne
 LIVE_CACHE_KEY = "segments_live"
 LIVE_CACHE_TTL = 90  # seconds
 
+# The map + predictions show only segments within this radius of downtown, so the
+# app stays focused on Austin proper instead of the far metro sprawl (Round Rock,
+# Cedar Park, Manor, Buda are all 20-28 km out). load_segments() itself stays the
+# FULL network — offline training-data builders need it so a sensor reading is
+# assigned to its true nearest road, not a closer in-radius one.
+DOWNTOWN_RADIUS_KM = float(os.environ.get("DOWNTOWN_RADIUS_KM", "10"))
+
 _segments: list[dict] | None = None
+_display_segments: list[dict] | None = None
 
 
 def _centroid(coords: list[list[float]]) -> tuple[float, float]:
@@ -70,8 +79,20 @@ def load_segments() -> list[dict]:
     return _segments
 
 
+def load_display_segments() -> list[dict]:
+    """Segments within DOWNTOWN_RADIUS_KM of downtown: the set shown on the map and
+    used for predictions/aggregates. A filtered, cached view over load_segments()."""
+    global _display_segments
+    if _display_segments is None:
+        _display_segments = [
+            s for s in load_segments() if s["dist_downtown_km"] <= DOWNTOWN_RADIUS_KM
+        ]
+    return _display_segments
+
+
 def segment_count() -> int:
-    return len(load_segments())
+    """Count of DISPLAYED (downtown) segments — what the map and predictions cover."""
+    return len(load_display_segments())
 
 
 def _live_congestion_pct(segment: dict, now: datetime) -> float:
@@ -90,7 +111,7 @@ def build_live_segments() -> dict:
     now = datetime.now()
     rng = random.Random(int(now.timestamp()) // LIVE_CACHE_TTL)  # stable within a cache window
     features: list[dict] = []
-    for seg in load_segments():
+    for seg in load_display_segments():
         base = base_pattern(seg["road_class"], seg["dist_downtown_km"], now)
         pct = max(0.0, min(100.0, base + rng.uniform(-3.0, 4.0)))
         level, index = congestion_level(pct)

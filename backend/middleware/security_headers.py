@@ -23,12 +23,15 @@ _SECURITY_HEADERS = {
     "Content-Security-Policy": _CSP,
 }
 
+# Frozen view iterated per response; built once at import rather than each request.
+_SECURITY_HEADER_ITEMS = tuple(_SECURITY_HEADERS.items())
+
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Attach hardening headers to every response, including error responses."""
 
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
-        for header, value in _SECURITY_HEADERS.items():
+        for header, value in _SECURITY_HEADER_ITEMS:
             response.headers.setdefault(header, value)
         return response

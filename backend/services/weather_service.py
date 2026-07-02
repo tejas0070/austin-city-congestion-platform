@@ -18,9 +18,14 @@ WEATHER_CODE_MAP: dict[int, str] = {
     1: "Mainly Clear", 2: "Partly Cloudy", 3: "Overcast",
     45: "Fog", 48: "Icy Fog",
     51: "Light Drizzle", 53: "Drizzle", 55: "Heavy Drizzle",
+    # Freezing drizzle/rain (WMO 56/57/66/67) — the black-ice producers Austin
+    # handles worst; classified as the most severe tier in congestion_features.
+    56: "Light Freezing Drizzle", 57: "Freezing Drizzle",
     61: "Light Rain", 63: "Rain", 65: "Heavy Rain",
-    71: "Light Snow", 73: "Snow", 75: "Heavy Snow",
+    66: "Light Freezing Rain", 67: "Freezing Rain",
+    71: "Light Snow", 73: "Snow", 75: "Heavy Snow", 77: "Snow Grains",
     80: "Rain Showers", 81: "Rain Showers", 82: "Heavy Rain Showers",
+    85: "Snow Showers", 86: "Heavy Snow Showers",
     95: "Thunderstorm", 96: "Thunderstorm with Hail", 99: "Thunderstorm with Hail",
 }
 

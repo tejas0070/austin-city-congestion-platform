@@ -16,10 +16,17 @@ import pandas as pd
 
 from ..etl.confidence import (
     absolute_width_anchors,
+    apply_density_cap,
     clamp_interval,
     confidence_label,
+    conformal_interval,
+    expected_value_anchors,
+    expected_value_interval,
+    modulated_half_width,
     width_to_confidence,
 )
+from ..etl.event_impact import event_congestion_uplift
+from ..etl.holiday_impact import holiday_congestion_multiplier
 from ..utils.cache import get_cache, set_cache
 from ..utils.geojson_builder import build_feature_collection, build_line_feature
 from .congestion_features import (
@@ -27,8 +34,9 @@ from .congestion_features import (
     WEATHER_PROFILES,
     build_feature_row,
     congestion_level,
+    weather_congestion_multiplier,
 )
-from .segments_service import load_segments
+from .segments_service import load_display_segments
 
 MODEL_PATH = Path(__file__).resolve().parents[2] / "data" / "models" / "congestion_model.pkl"
 META_PATH = Path(__file__).resolve().parents[2] / "data" / "models" / "model_meta.json"
@@ -74,21 +82,28 @@ def _load_seasonal_prior() -> dict:
     return _seasonal_prior
 
 
-def _seasonal_level_for(segment: dict, target_dt: datetime) -> float | None:
-    """Resolve a segment's typical congestion for this hour-of-week from the prior.
+def _resolve_seasonal(segment: dict, target_dt: datetime) -> tuple[float | None, str, int]:
+    """Resolve (level, support_tier, support_count) for this segment & hour-of-week.
 
-    Tier 1: this exact segment's history. Tier 2: its road-class average.
-    Tier 3: the global mean. None → build_feature_row falls back to base_pattern.
+    Tier 1 "segment": this exact segment's real history (count = readings backing
+    it). Tier 2 "road_class": its road-class average. Tier 3 "global": the city
+    mean. The tier+count drive the density-aware confidence cap (lever 2) so a
+    road can't read more confident than the data supporting it.
     """
     prior = _load_seasonal_prior()
     key = f"{target_dt.hour}_{1 if target_dt.weekday() >= 5 else 0}"
-    by_seg = prior.get("by_segment", {}).get(str(segment.get("segment_id")))
+    seg_id = str(segment.get("segment_id"))
+    by_seg = prior.get("by_segment", {}).get(seg_id)
     if by_seg and key in by_seg:
-        return by_seg[key]
+        # Default 0 (not 1) when the support count is missing: a segment with a
+        # seasonal level but no recorded observation count must not silently earn
+        # confidence above the road-class fallback cap.
+        count = prior.get("support", {}).get("by_segment", {}).get(seg_id, {}).get(key, 0)
+        return by_seg[key], "segment", int(count)
     by_rc = prior.get("by_road_class", {}).get(segment.get("road_class"))
     if by_rc and key in by_rc:
-        return by_rc[key]
-    return prior.get("global")
+        return by_rc[key], "road_class", 0
+    return prior.get("global"), "global", 0
 
 
 def model_is_available() -> bool:
@@ -132,29 +147,81 @@ def _width_anchors() -> tuple[float, float]:
     return absolute_width_anchors()
 
 
-def _segment_confidences(rows: list[dict]) -> list[tuple[float, float, float]] | None:
-    """Per-segment (low, high, confidence) from the q10/q90 interval widths.
+def _segment_confidences(
+    rows: list[dict], predictions=None,
+) -> list[tuple[float, float, float]] | None:
+    """Per-segment (low, high, confidence) for the displayed prediction.
 
-    Returns one tuple per row, or None when quantile models are unavailable (so
-    callers degrade to predictions without a confidence signal). Confidence is
-    the single source of truth shared by the single-time, whole-day, and
-    whole-week paths.
+    Returns one tuple per row, or None when the confidence artifact is missing (so
+    callers degrade to predictions without a confidence signal). The density cap
+    keyed on each row's support tier/count always applies, so a road can never
+    read more confident than the real history backing it. Shared by the
+    single-time, whole-day, and whole-week paths.
+
+    Preferred path (lever 3): the EXPECTED-VALUE interval `pred ± ev_q`, calibrated
+    so it covers the typical (per corridor x hour-of-week) congestion the app
+    actually displays. The calibrated average half-width is then redistributed
+    across corridors by each one's learned per-reading spread (`modulated_half_width`)
+    so confidence genuinely varies by road and hour instead of being one global
+    constant. Falls back to the per-reading 50% band (conformal widened) for older
+    artifacts that predate `ev_q`.
+
+    Confidence is derived from the TRUE (unclamped) interval half-width, not the
+    width after clipping to [0, 100] — otherwise a near-empty road whose interval
+    is clipped at the 0 floor would read spuriously more confident.
     """
     if not rows or not quantiles_are_available():
         return None
     quants = _load_quantiles()
     if quants is None:
         return None
+    ev_q = quants.get("ev_q_80") if isinstance(quants, dict) else None
+    if ev_q is not None and predictions is not None:
+        ev_full, ev_zero = expected_value_anchors()
+        ref_width = quants.get("ev_ref_width") if isinstance(quants, dict) else None
+        widths = _per_reading_widths(rows, quants) if ref_width else None
+        out: list[tuple[float, float, float]] = []
+        for i, (pred, row) in enumerate(zip(predictions, rows)):
+            width = widths[i] if widths is not None else None
+            half = modulated_half_width(float(ev_q), width, ref_width)
+            lo, hi = clamp_interval(*expected_value_interval(float(pred), half))
+            raw_conf = width_to_confidence(2.0 * half, ev_full, ev_zero)
+            tier, count = row.get("_support", ("global", 0))
+            out.append((lo, hi, apply_density_cap(raw_conf, tier, count)))
+        return out
+
+    # Back-compat: per-reading central 50% band (q25/q75), conformal widened.
     frame = pd.DataFrame(rows)[FEATURE_ORDER]
-    # Saved as low/high (currently the central 50% band q25/q75).
     low_preds = quants["low"].predict(frame)
     high_preds = quants["high"].predict(frame)
+    conformal_q = float(quants.get("conformal_q", 0.0)) if isinstance(quants, dict) else 0.0
     w_low, w_high = _width_anchors()
-    out: list[tuple[float, float, float]] = []
-    for lo_raw, hi_raw in zip(low_preds, high_preds):
-        lo, hi = clamp_interval(float(lo_raw), float(hi_raw))
-        out.append((lo, hi, width_to_confidence(hi - lo, w_low, w_high)))
+    out = []
+    for lo_raw, hi_raw, row in zip(low_preds, high_preds, rows):
+        lo, hi = conformal_interval(float(lo_raw), float(hi_raw), conformal_q)
+        raw_conf = width_to_confidence(hi - lo, w_low, w_high)  # true width, pre-clamp
+        lo, hi = clamp_interval(lo, hi)
+        tier, count = row.get("_support", ("global", 0))
+        out.append((lo, hi, apply_density_cap(raw_conf, tier, count)))
     return out
+
+
+def _per_reading_widths(rows: list[dict], quants: dict) -> list[float] | None:
+    """Per-row learned uncertainty: the q75-q25 band width for each feature row.
+
+    This is the model's own estimate of how spread-out readings are for that
+    corridor+hour — wider where it is less sure. Returns None (so callers use the
+    unmodulated half-width) when the quantile models are absent or fail.
+    """
+    if not isinstance(quants, dict) or "low" not in quants or "high" not in quants:
+        return None
+    try:
+        frame = pd.DataFrame(rows)[FEATURE_ORDER]
+        low_preds = quants["low"].predict(frame)
+        high_preds = quants["high"].predict(frame)
+    except Exception:  # noqa: BLE001 - degrade to the unmodulated half-width
+        return None
+    return [abs(float(h) - float(l)) for l, h in zip(low_preds, high_preds)]
 
 
 def _mean_confidence(confidences: list[float]) -> float:
@@ -208,25 +275,54 @@ def _run_predictions(
     temp_f: float,
     precip_in: float,
     events: list[dict],
+    weather_mult: float = 1.0,
 ) -> tuple[list[dict], list[dict], list[float]]:
-    """Build feature rows for every segment at target_dt and run the model.
+    """Build feature rows for every segment at target_dt and run the model, then
+    apply the weather + event overlays.
 
-    Returns (segments, rows, predictions). Shared by the single-time and
-    whole-day prediction paths.
+    The model itself learns only the BASELINE traffic flow (time, location, road
+    class, typical patterns). On top of each baseline prediction we apply the
+    weather severity multiplier and add the event-attendance uplift — the two
+    educated-guess overlays — so the served congestion is
+    `baseline * weather_mult + event_uplift`. Returns (segments, rows, predictions);
+    shared by the single-time and whole-day prediction paths.
     """
-    segments = load_segments()
+    segments = load_display_segments()
     if not segments:
         return segments, [], []
-    rows = [
-        build_feature_row(
+    rows = []
+    for seg in segments:
+        level, tier, count = _resolve_seasonal(seg, target_dt)
+        row = build_feature_row(
             seg, target_dt, weather_code, temp_f, precip_in, events,
-            seasonal_level=_seasonal_level_for(seg, target_dt),
+            seasonal_level=level,
         )
-        for seg in segments
-    ]
+        # Serving-only metadata for the density-aware confidence cap; dropped from
+        # the model frame below (it selects FEATURE_ORDER only).
+        row["_support"] = (tier, count)
+        rows.append(row)
     frame = pd.DataFrame(rows)[FEATURE_ORDER]
     predictions = _load_model().predict(frame)
-    return segments, rows, predictions
+    # Overlays on the learned baseline flow, none of them learned features — all
+    # transparent educated guesses: (1) weather severity and (2) a federal-holiday
+    # factor both multiply the baseline (bad weather makes the usual congestion
+    # proportionally worse; a holiday trims the commute), and (3) the event surge is
+    # added on top. So served congestion = baseline * weather_mult * holiday_mult
+    # + event_uplift. Re-centers everything downstream (colour, interval, aggregates)
+    # on the overlay-adjusted value. The holiday factor is derived from the date here
+    # so every serving path inherits it without extra plumbing.
+    holiday_mult = holiday_congestion_multiplier(target_dt)
+    adjusted = []
+    for pred, row in zip(predictions, rows):
+        # Clamp the baseline at 0 before the multipliers so a marginally-negative
+        # prediction on a near-empty road can't invert the weather/holiday effect.
+        base = max(0.0, float(pred))
+        uplift = event_congestion_uplift(row["nearby_event_attendance"])
+        row["_event_uplift"] = uplift
+        row["_weather_mult"] = weather_mult
+        row["_holiday_mult"] = holiday_mult
+        adjusted.append(base * weather_mult * holiday_mult + uplift)
+    return segments, rows, adjusted
 
 
 async def _resolve_events(include_events: bool, days: int = 7) -> list[dict]:
@@ -252,7 +348,7 @@ async def predict_for_datetime(
     if weather is None:
         from .weather_service import fetch_current_weather
         weather = await fetch_current_weather()
-    code, temp_f, precip_in, _ = _resolve_weather(weather)
+    code, temp_f, precip_in, condition = _resolve_weather(weather)
 
     if events is None:
         events = await _resolve_events(include_events)
@@ -261,7 +357,7 @@ async def predict_for_datetime(
     # them off the event loop so concurrent requests (model info, the day/week
     # panels) are not starved while one prediction is computed.
     return await asyncio.to_thread(
-        _build_datetime_fc, target_dt, code, temp_f, precip_in, events
+        _build_datetime_fc, target_dt, code, temp_f, precip_in, events, condition
     )
 
 
@@ -271,11 +367,15 @@ def _build_datetime_fc(
     temp_f: float,
     precip_in: float,
     events: list[dict],
+    condition: str = "Clear",
 ) -> dict:
     """Synchronous core of predict_for_datetime (runs in a worker thread)."""
-    segments, rows, predictions = _run_predictions(target_dt, code, temp_f, precip_in, events)
+    segments, rows, predictions = _run_predictions(
+        target_dt, code, temp_f, precip_in, events,
+        weather_congestion_multiplier(condition, temp_f),
+    )
 
-    intervals = _segment_confidences(rows)
+    intervals = _segment_confidences(rows, predictions)
 
     confidences: list[float] = []
     features: list[dict] = []
@@ -292,6 +392,10 @@ def _build_datetime_fc(
             "nearby_event_attendance": row["nearby_event_attendance"],
             "predicted_for": target_dt.isoformat(timespec="minutes"),
         }
+        if row.get("_event_uplift"):
+            # Attribute how much of this segment's congestion is the nearby-event
+            # overlay (only present when an event actually affects the road).
+            props["event_uplift_pct"] = round(row["_event_uplift"], 1)
         if intervals is not None:
             lo, hi, conf = intervals[i]
             confidences.append(conf)
@@ -355,7 +459,7 @@ def _segments_geometry_fc() -> dict:
                 "road_name": seg["name"],
                 "road_class": seg["road_class"],
             })
-            for seg in load_segments()
+            for seg in load_display_segments()
         ]
         _geometry_fc_cache = build_feature_collection(features)
     return _geometry_fc_cache
@@ -375,7 +479,7 @@ async def predict_day(target_date: date, include_events: bool = True) -> dict:
 
     _load_model()  # surfaces FileNotFoundError before doing work
 
-    segments = load_segments()
+    segments = load_display_segments()
     if not segments:
         return {
             "date": target_date.isoformat(),
@@ -424,7 +528,10 @@ def _compute_day(
         sources.add(source)
 
         code, temp_f, precip_in, condition = _resolve_weather(weather)
-        _, rows, predictions = _run_predictions(hour_dt, code, temp_f, precip_in, events)
+        _, rows, predictions = _run_predictions(
+            hour_dt, code, temp_f, precip_in, events,
+            weather_congestion_multiplier(condition, temp_f),
+        )
 
         indices: list[int] = []
         total_pct = 0.0
@@ -449,7 +556,7 @@ def _compute_day(
             "weather_source": source,
         }
 
-        intervals = _segment_confidences(rows)
+        intervals = _segment_confidences(rows, predictions)
         if intervals is not None:
             hour_conf = _mean_confidence([conf for _, _, conf in intervals])
             hourly_confidences.append(hour_conf)

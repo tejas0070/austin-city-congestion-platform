@@ -54,16 +54,19 @@ WEATHER_PROFILES: dict[str, tuple[int, float, float, float]] = {
 _PROXIMITY_RADIUS_KM = 8.0
 _TIME_WINDOW_HOURS = 3.0
 
+# The model learns the BASELINE traffic flow only — time, location, road class,
+# and each corridor's real typical congestion. Weather and events are deliberately
+# NOT model features: their real-data signal is weak/absent (see docs/radar_ablation.md
+# — events are 0 in 100% of rows, weather is weak and sometimes wrong-signed), so
+# they are applied on top as transparent, educated-guess OVERLAYS instead
+# (weather_congestion_multiplier + event_impact.event_congestion_uplift). This keeps
+# the learned part honest and the overlays interpretable and reliable.
 NUMERIC_FEATURES: list[str] = [
     "hour",
     "day_of_week",
     "is_weekend",
     "month",
-    "weather_code",
-    "temperature_f",
-    "precipitation_in",
     "dist_downtown_km",
-    "nearby_event_attendance",
     "base_pattern",
     # Data-driven autoregressive prior: this segment's REAL typical congestion at
     # this hour-of-week, learned from history. It carries segment-specific signal
@@ -76,6 +79,79 @@ NUMERIC_FEATURES: list[str] = [
 CATEGORICAL_FEATURES: list[str] = ["road_class"]
 FEATURE_ORDER: list[str] = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 TARGET_COLUMN = "congestion_pct"
+
+
+# Educated-guess congestion multiplier for EVERY condition weather_service's
+# WEATHER_CODE_MAP can emit (an overlay on the learned baseline, NOT a learned
+# effect). Ranked for AUSTIN specifically, where the hazard order is not the national
+# one — the city has almost no ice/snow infrastructure and sits in Flash Flood Alley,
+# so ice and flooding shut roads down while hail is merely "high impact":
+#
+#   Tier 1 (severe, routes shut down for hours): black ice / freezing rain — untreated
+#     bridges & overpasses (I-35 upper deck, 360) — and flash flooding from heavy rain
+#     (low-water crossings at Shoal/Barton/Onion Creek). Also the rare paralyzing snow.
+#   Tier 2 (high impact, sudden & disruptive): dense fog (Hill Country pileups on 290/
+#     71/I-35), severe thunderstorms & hail (downed trees/signals, dark intersections),
+#     ordinary snow.
+#   Tier 3 (moderate daily friction): light rain/drizzle, snow grains. (Extreme heat
+#     and sun glare are handled by temperature below / noted as a future per-road
+#     feature, since glare depends on road bearing + sun position.)
+#
+# Keep this in sync with WEATHER_CODE_MAP (a test asserts full coverage) so no real
+# condition silently falls through to "no effect".
+WEATHER_CONGESTION_MULTIPLIER: dict[str, float] = {
+    # Tier 0 — benign, no measurable driving effect
+    "Clear": 1.0, "Mainly Clear": 1.0, "Partly Cloudy": 1.0, "Overcast": 1.0,
+    # Tier 3 — moderate daily friction
+    "Light Drizzle": 1.1, "Drizzle": 1.15, "Heavy Drizzle": 1.2,
+    "Light Rain": 1.2, "Snow Grains": 1.3,
+    # Tier 2 — high impact, sudden & disruptive
+    "Rain": 1.4, "Rain Showers": 1.4,
+    "Light Snow": 1.5, "Snow Showers": 1.5,
+    "Fog": 1.55,
+    "Thunderstorm": 1.6, "Storm": 1.6,  # ("Storm" = legacy synthetic label)
+    "Icy Fog": 1.7, "Thunderstorm with Hail": 1.7, "Snow": 1.7, "Heavy Snow Showers": 1.7,
+    # Tier 1 — severe, routes shut down (flooding + ice, the Austin worst case)
+    "Heavy Rain": 1.8, "Heavy Rain Showers": 1.8,   # flash flooding
+    "Light Freezing Drizzle": 1.7, "Freezing Drizzle": 1.85,
+    "Heavy Snow": 1.9,
+    "Light Freezing Rain": 1.9, "Freezing Rain": 2.0,   # black ice — the worst
+}
+DEFAULT_WEATHER_MULTIPLIER = 1.0
+
+# Temperature-driven escalations (Austin's signature risks the code label alone
+# misses). Below freezing, ANY liquid precip becomes black ice — the region's most
+# disruptive condition — so it is escalated to the ice ceiling regardless of how the
+# API labeled it. Extreme summer heat buckles pavement and blows tires (daily friction).
+FREEZING_TEMP_F = 34.0
+BLACK_ICE_MULTIPLIER = 2.0
+EXTREME_HEAT_F = 100.0
+EXTREME_HEAT_MULTIPLIER = 1.15
+
+# Liquid-precipitation labels that turn to black ice at/below freezing.
+_FREEZES_TO_ICE: frozenset[str] = frozenset({
+    "Light Drizzle", "Drizzle", "Heavy Drizzle",
+    "Light Rain", "Rain", "Heavy Rain", "Rain Showers", "Heavy Rain Showers",
+})
+
+
+def weather_congestion_multiplier(condition: str, temperature_f: float | None = None) -> float:
+    """Austin-tailored congestion multiplier for a weather condition — an overlay on
+    the learned baseline, NOT a learned effect.
+
+    Grades every real Open-Meteo condition by its Austin driving impact (see
+    WEATHER_CONGESTION_MULTIPLIER); unknown labels default to 1.0. When a temperature
+    is supplied, two local escalations apply: liquid precip at/below freezing becomes
+    black ice (the city's worst case), and extreme heat adds pavement/blowout friction.
+    """
+    base = WEATHER_CONGESTION_MULTIPLIER.get(condition, DEFAULT_WEATHER_MULTIPLIER)
+    if temperature_f is None:
+        return base
+    if temperature_f <= FREEZING_TEMP_F and condition in _FREEZES_TO_ICE:
+        return max(base, BLACK_ICE_MULTIPLIER)
+    if temperature_f >= EXTREME_HEAT_F:
+        return max(base, EXTREME_HEAT_MULTIPLIER)
+    return base
 
 
 def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -111,17 +187,17 @@ def base_pattern(road_class: str, dist_downtown_km: float, dt: datetime) -> floa
     return peak * _diurnal_factor(dt) * _downtown_factor(dist_downtown_km) * weekend
 
 
-def _proximity_weight(distance_km: float) -> float:
-    if distance_km >= _PROXIMITY_RADIUS_KM:
+def _proximity_weight(distance_km: float, radius_km: float = _PROXIMITY_RADIUS_KM) -> float:
+    if distance_km >= radius_km:
         return 0.0
-    return 1.0 - (distance_km / _PROXIMITY_RADIUS_KM)
+    return 1.0 - (distance_km / radius_km)
 
 
-def _time_weight(hours_diff: float) -> float:
+def _time_weight(hours_diff: float, window_hours: float = _TIME_WINDOW_HOURS) -> float:
     h = abs(hours_diff)
-    if h >= _TIME_WINDOW_HOURS:
+    if h >= window_hours:
         return 0.0
-    return 1.0 - (h / _TIME_WINDOW_HOURS)
+    return 1.0 - (h / window_hours)
 
 
 def nearby_event_attendance(
@@ -134,20 +210,31 @@ def nearby_event_attendance(
 
     Each event dict must have lat, lng, expected_attendance, and `start_dt`.
     """
+    from backend.etl.event_impact import event_reach_km, event_time_window_hours
+
     total = 0.0
     for ev in events:
         start_dt = ev.get("start_dt")
         if start_dt is None:
             continue
-        tw = _time_weight((dt - start_dt).total_seconds() / 3600.0)
+        attendance = ev.get("expected_attendance") or 0
+        # Bigger crowds affect traffic EARLIER (and linger) — a stadium game snarls
+        # roads hours before kickoff — so the time window scales with the crowd too.
+        tw = _time_weight(
+            (dt - start_dt).total_seconds() / 3600.0,
+            event_time_window_hours(attendance),
+        )
         if tw <= 0:
             continue
+        # Bigger crowds also reach farther, so a mega-event backs up roads a small
+        # concert never would; distance still decays the effect within that reach.
         pw = _proximity_weight(
-            haversine_km(centroid_lat, centroid_lng, ev["lat"], ev["lng"])
+            haversine_km(centroid_lat, centroid_lng, ev["lat"], ev["lng"]),
+            event_reach_km(attendance),
         )
         if pw <= 0:
             continue
-        total += (ev.get("expected_attendance") or 0) * pw * tw
+        total += attendance * pw * tw
     return round(total, 1)
 
 
@@ -164,7 +251,8 @@ def synthetic_congestion(
     signal = nearby_event_attendance(
         segment["centroid_lat"], segment["centroid_lng"], dt, events
     )
-    event_boost_pct = min(45.0, signal / 1500.0)
+    from backend.etl.event_impact import event_congestion_uplift
+    event_boost_pct = event_congestion_uplift(signal)
     return max(0.0, min(100.0, base * weather_mult + event_boost_pct + noise))
 
 

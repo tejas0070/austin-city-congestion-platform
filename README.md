@@ -6,13 +6,13 @@ Real-time Austin, TX traffic on an interactive kepler.gl map, plus a city-wide
 
 ## Stack
 
-| Layer    | Technology                                              |
-| -------- | ------------------------------------------------------- |
-| Frontend | React 18, Redux, kepler.gl v3, framer-motion, Tailwind  |
-| Backend  | FastAPI, SQLAlchemy 2.0, PostgreSQL, httpx              |
-| ML       | scikit-learn `HistGradientBoostingRegressor` + quantiles |
-| Map      | MapLibre GL JS + Carto Dark Matter (no token needed)    |
-| Build    | CRACO (CRA 5 + webpack polyfills)                       |
+| Layer    | Technology                                                |
+| -------- | --------------------------------------------------------- |
+| Frontend | React 18, Redux, kepler.gl v3, framer-motion, Tailwind    |
+| Backend  | FastAPI, SQLAlchemy 2.0, PostgreSQL, httpx                |
+| ML       | scikit-learn `HistGradientBoostingRegressor` + quantiles  |
+| Map      | MapLibre GL JS + Carto Dark Matter (no token needed)      |
+| Build    | CRACO (CRA 5 + webpack polyfills)                         |
 
 ## Quick Start
 

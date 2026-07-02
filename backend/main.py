@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,12 +29,20 @@ app = FastAPI(
 # SecurityHeaders outermost guarantees hardening headers land on every response,
 # including CORS preflights and 429s. CORS wraps RateLimit so a rejected request
 # still carries the headers the browser needs to read the 429.
+# Allowed browser origins. Localhost (dev) and any *.netlify.app site work out of
+# the box; add a custom domain or extra hosts via the comma-separated
+# ALLOWED_ORIGINS env var (e.g. "https://traffic.example.com,https://foo.com").
+_default_origins = ["http://localhost:3000", "http://localhost:3001"]
+_extra_origins = [
+    o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
+
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
-    allow_origin_regex=r"https://[a-z0-9\-]+\.netlify\.app",
+    allow_origins=_default_origins + _extra_origins,
+    allow_origin_regex=r"https://([a-z0-9\-]+\.)*(netlify\.app|vercel\.app|pages\.dev)",
     allow_credentials=False,
     allow_methods=["GET"],
     allow_headers=["*"],

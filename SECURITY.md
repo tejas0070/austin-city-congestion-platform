@@ -65,8 +65,8 @@ tree and may have been shared/exposed):
 |-----|-----------------|-----------------|
 | `TICKETMASTER_API_KEY` | https://developer.ticketmaster.com (regenerate) | Yes — events |
 | `DB_PASSWORD` (`Texas123`) | Rotate the Postgres role password | Yes — DB / docker-compose |
-| `TOMTOM_API_KEY` | https://developer.tomtom.com | **No** — stale leftover; delete from `.env` |
-| `OPENWEATHER_API_KEY` | https://openweathermap.org/api | **No** — weather uses Open-Meteo (keyless); delete from `.env` |
+| `TOMTOM_API_KEY` | https://developer.tomtom.com | Yes — offline collector `scripts/collect_tomtom_observations.py` (not the live serving path). Rotate; keep it if you still collect training data, otherwise delete. |
+| `OPENWEATHER_API_KEY` | https://openweathermap.org/api | **No** — no code reads it (weather uses keyless Open-Meteo); delete from `.env`. |
 
 After rotating, also set a strong DB password (avoid `Texas123`-style values)
 and confirm `.env` is never staged (`git status` should not list it).

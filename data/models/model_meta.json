@@ -4,11 +4,7 @@
     "day_of_week",
     "is_weekend",
     "month",
-    "weather_code",
-    "temperature_f",
-    "precipitation_in",
     "dist_downtown_km",
-    "nearby_event_attendance",
     "base_pattern",
     "seasonal_level"
   ],
@@ -20,40 +16,51 @@
     "day_of_week",
     "is_weekend",
     "month",
-    "weather_code",
-    "temperature_f",
-    "precipitation_in",
     "dist_downtown_km",
-    "nearby_event_attendance",
     "base_pattern",
     "seasonal_level",
     "road_class"
   ],
   "target": "congestion_pct",
   "model_type": "HistGradientBoostingRegressor",
-  "test_mae": 7.169,
-  "test_r2": 0.5438,
-  "training_rows": 277390,
+  "test_mae": 9.093,
+  "test_r2": 0.2364,
+  "point_holdout_r2": 0.2364,
+  "point_holdout_mae": 9.093,
+  "leakfree_eval": true,
+  "training_rows": 382179,
   "interval": {
     "lower_quantile": 0.1,
     "upper_quantile": 0.9,
     "nominal_coverage": 0.8
   },
-  "empirical_coverage": 0.901,
+  "empirical_coverage": 0.8748,
   "confidence_interval": {
     "lower_quantile": 0.25,
     "upper_quantile": 0.75
   },
-  "confidence_interval_coverage": 0.4721,
+  "conformal_q": 0.0,
+  "confidence_interval_coverage_raw": 0.4201,
+  "confidence_interval_coverage": 0.522,
+  "expected_value_interval": {
+    "ev_q_80": 3.997,
+    "ev_q_50": 1.355,
+    "coverage_80": 0.7952,
+    "coverage_50": 0.4978,
+    "buckets": 907,
+    "ev_ref_width": 12.589,
+    "note": "pred +/- ev_q (modulated per-corridor) covers the typical value"
+  },
   "width_anchors": {
-    "p5": 3.184,
-    "p95": 28.276
+    "p5": 2.92,
+    "p95": 29.566
   },
   "confidence_anchors": {
     "full": 8.0,
     "zero": 45.0
   },
-  "confidence_mean": 84.4,
-  "confidence_pct_high": 69.0,
+  "confidence_mean": 81.8,
+  "confidence_pct_high": 72.3,
+  "confidence_mean_per_reading_legacy": 85.0,
   "data_source": "City of Austin Bluetooth travel sensors (real)"
 }

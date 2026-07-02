@@ -28,6 +28,7 @@ from ..etl.confidence import (
 from ..etl.event_impact import event_congestion_uplift
 from ..etl.holiday_impact import holiday_congestion_multiplier
 from ..utils.cache import get_cache, set_cache
+from ..utils.clock import austin_now, austin_today
 from ..utils.geojson_builder import build_feature_collection, build_line_feature
 from .congestion_features import (
     FEATURE_ORDER,
@@ -408,7 +409,7 @@ def _build_datetime_fc(
         features.append(build_line_feature(seg["coords"], props))
 
     result = build_feature_collection(features)
-    result["generated_at"] = datetime.now().isoformat(timespec="seconds")
+    result["generated_at"] = austin_now().isoformat(timespec="seconds")
     result["predicted_for"] = target_dt.isoformat(timespec="minutes")
     if confidences:
         avg = _mean_confidence(confidences)
@@ -427,7 +428,7 @@ async def predict_segments(
     if cached:
         return cached
 
-    target_dt = datetime.now() + timedelta(hours=hours_ahead)
+    target_dt = austin_now() + timedelta(hours=hours_ahead)
     result = await predict_for_datetime(target_dt, include_events=include_events)
     result["hours_ahead"] = hours_ahead
     set_cache(cache_key, result, _PREDICTION_CACHE_TTL)
@@ -484,7 +485,7 @@ async def predict_day(target_date: date, include_events: bool = True) -> dict:
         return {
             "date": target_date.isoformat(),
             "weather_source": "proxy",
-            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "generated_at": austin_now().isoformat(timespec="seconds"),
             "segments": build_feature_collection([]),
             "hours": [],
             "series": [],
@@ -494,7 +495,7 @@ async def predict_day(target_date: date, include_events: bool = True) -> dict:
     current = await fetch_current_weather()
     forecast = await fetch_hourly_forecast(target_date)
 
-    days_until = (target_date - datetime.now().date()).days
+    days_until = (target_date - austin_today()).days
     events = await _resolve_events(include_events, days=max(7, days_until + 1))
 
     # All 24 hours of model inference are CPU-bound; compute them in a worker
@@ -569,7 +570,7 @@ def _compute_day(
     result = {
         "date": target_date.isoformat(),
         "weather_source": weather_source,
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "generated_at": austin_now().isoformat(timespec="seconds"),
         "segments": _segments_geometry_fc(),
         "hours": hours_meta,
         "series": series,
@@ -627,7 +628,7 @@ async def predict_week(start_date: date, include_events: bool = True) -> dict:
     result = {
         "start_date": start_date.isoformat(),
         "end_date": (start_date + timedelta(days=_WEEK_LENGTH - 1)).isoformat(),
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "generated_at": austin_now().isoformat(timespec="seconds"),
         "days": days,
     }
     if daily_confidences:
@@ -651,7 +652,7 @@ async def warm_caches() -> None:
         return
     try:
         await predict_segments(hours_ahead=2.0)
-        today = date.today()
+        today = austin_today()
         await predict_day(today)
         monday = today - timedelta(days=today.weekday())
         await predict_week(monday)

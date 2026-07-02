@@ -1,0 +1,60 @@
+name: Retrain congestion model
+
+# Self-updating model, free: every 6 hours collect a budget-bounded sample of
+# real TomTom congestion, retrain, and — only if the regression gate approves the
+# new model — commit the improved artifacts back to main. Pushing to main triggers
+# Render to redeploy with the fresh model automatically.
+#
+# Requires repo secret TOMTOM_API_KEY (Settings -> Secrets and variables -> Actions).
+# SOCRATA_APP_TOKEN and TICKETMASTER_API_KEY are optional.
+on:
+  schedule:
+    - cron: "0 */6 * * *" # 00:00, 06:00, 12:00, 18:00 UTC
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+# Never let two retrains overlap (they'd race on the same data files + push).
+concurrency:
+  group: retrain-model
+  cancel-in-progress: false
+
+# Needed so the job can push the retrained artifacts back to the repo.
+permissions:
+  contents: write
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Collect real data + retrain (budget-guarded, gated)
+        env:
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
+          SOCRATA_APP_TOKEN: ${{ secrets.SOCRATA_APP_TOKEN }}
+          TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
+        run: python scripts/auto_update.py
+
+      - name: Commit improved model + accumulated observations
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # tomtom_observations.csv is git-ignored (force-add); data/models/ is tracked.
+          git add -f data/training/tomtom_observations.csv
+          git add data/models/
+          if git diff --cached --quiet; then
+            echo "Nothing changed (budget spent or the regression gate blocked the retrain) — no commit."
+          else
+            git commit -m "chore: automated retrain [skip ci]"
+            git push
+          fi

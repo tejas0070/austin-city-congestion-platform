@@ -1,0 +1,26 @@
+# Render Blueprint — free FastAPI backend for the Austin Traffic Intelligence API.
+# Deploy: push to GitHub, then in Render → "New +" → "Blueprint" → pick this repo.
+# No database to provision: the app runs on bundled SQLite + committed ML artifacts.
+services:
+  - type: web
+    name: austin-traffic-api
+    runtime: python
+    plan: free
+    # Committed model + geo artifacts mean the app serves out of the box.
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.4"
+      # Comma-separated extra browser origins allowed by CORS. Your Netlify site
+      # (*.netlify.app) already works without this; set it only for a custom domain.
+      - key: ALLOWED_ORIGINS
+        sync: false
+      # Optional free-tier API keys — leave unset to run with silent fallbacks.
+      - key: TOMTOM_API_KEY
+        sync: false
+      - key: TICKETMASTER_API_KEY
+        sync: false
+      - key: SOCRATA_APP_TOKEN
+        sync: false

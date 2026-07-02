@@ -39,7 +39,12 @@ def _add_seasonal_level(df: pd.DataFrame) -> None:
 
 
 def _write_seasonal_prior(df: pd.DataFrame) -> None:
-    """Persist full-group seasonal means for serving (per segment, per road class)."""
+    """Persist full-group seasonal means + per-segment support counts for serving.
+
+    `support.by_segment[seg][howk]` is how many real readings back that segment's
+    hour-of-week mean. The live predictor uses it to cap confidence by how much
+    history actually supports each road (backend/etl/confidence.density_*).
+    """
     def _means(group_cols: list[str]) -> dict:
         means = df.groupby(group_cols + ["hour", "is_weekend"])[TARGET_COLUMN].mean().round(2)
         out: dict[str, dict[str, float]] = {}
@@ -48,10 +53,19 @@ def _write_seasonal_prior(df: pd.DataFrame) -> None:
             out.setdefault(str(key), {})[_howk_key(hour, weekend)] = float(value)
         return out
 
+    def _counts(group_cols: list[str]) -> dict:
+        sizes = df.groupby(group_cols + ["hour", "is_weekend"])[TARGET_COLUMN].size()
+        out: dict[str, dict[str, int]] = {}
+        for idx, value in sizes.items():
+            key, hour, weekend = idx[0], idx[-2], idx[-1]
+            out.setdefault(str(key), {})[_howk_key(hour, weekend)] = int(value)
+        return out
+
     artifact = {
         "by_segment": _means(["_segment_id"]),
         "by_road_class": _means(["road_class"]),
         "global": round(float(df[TARGET_COLUMN].mean()), 2),
+        "support": {"by_segment": _counts(["_segment_id"])},
     }
     PRIOR_PATH.parent.mkdir(parents=True, exist_ok=True)
     PRIOR_PATH.write_text(json.dumps(artifact), encoding="utf-8")
@@ -74,7 +88,11 @@ def finalize() -> int:
     df = pd.concat(parts, ignore_index=True)
     _add_seasonal_level(df)
     _write_seasonal_prior(df)
-    df = df[FEATURE_ORDER + [TARGET_COLUMN]]
+    # Keep `_segment_id` so train_model.py can recompute `seasonal_level`
+    # leak-free per train/test fold (see backend/etl/training_eval.py). The
+    # full-data column written above stays as a fallback for consumers that
+    # don't split by fold (e.g. the synthetic generator / confidence_report).
+    df = df[FEATURE_ORDER + [TARGET_COLUMN, "_segment_id"]]
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(OUT_PATH, index=False)
     print(f"Finalized {len(df):,} rows ({df.shape}) -> {OUT_PATH.name}")

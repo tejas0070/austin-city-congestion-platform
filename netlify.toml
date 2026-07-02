@@ -1,0 +1,23 @@
+# Netlify config for the React + kepler.gl frontend.
+# Deploy: Netlify → "Add new site" → "Import from Git" → pick this repo.
+# Netlify auto-detects this file; the settings below override the UI.
+[build]
+  base    = "frontend"
+  command = "npm run build"
+  publish = "build"
+
+[build.environment]
+  # CRA needs the build to succeed even with lint warnings.
+  CI = "false"
+  NODE_VERSION = "20"
+  # ── REQUIRED: point the frontend at your deployed backend ──────────────────
+  # Replace with your Render URL after the API deploys, e.g.
+  #   https://austin-traffic-api.onrender.com
+  # (You can also set REACT_APP_API_BASE_URL in the Netlify UI instead.)
+  REACT_APP_API_BASE_URL = "https://austin-traffic-api.onrender.com"
+
+# Single-page app: serve index.html for any client-side route.
+[[redirects]]
+  from = "/*"
+  to   = "/index.html"
+  status = 200

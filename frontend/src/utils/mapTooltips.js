@@ -148,6 +148,9 @@ export function withPredictedTooltips(fc) {
           ? `${p.confidence_pct}% (${p.confidence_label})`
           : `${p.confidence_pct}%`
         : '',
+    ...(p.event_uplift_pct != null && p.event_uplift_pct > 0
+      ? { 'Event Impact': `+${Math.round(p.event_uplift_pct)}%` }
+      : {}),
     'Forecast Time': formatClock(p.predicted_for),
   }));
 }

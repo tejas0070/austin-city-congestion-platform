@@ -19,6 +19,7 @@ on:
       - 'data/models/**'
       - 'data/geo/**'
       - 'requirements.txt'
+      - 'docker/Dockerfile'
       - 'deploy/hf/**'
       - '.github/workflows/deploy-hf.yml'
   # Retrain commits are pushed with [skip ci], so ride the retrain workflow's
@@ -50,7 +51,18 @@ jobs:
           cp -r data/models hf/data/
           cp -r data/geo hf/data/
           cp requirements.txt hf/
-          cp deploy/hf/Dockerfile hf/Dockerfile
+          # Single source of truth for the run command: reuse the canonical
+          # Dockerfile (proxy-headers, module path, uvicorn flags) and append only
+          # the HF-specific env. Avoids maintaining a second Dockerfile that drifts.
+          cp docker/Dockerfile hf/Dockerfile
+          {
+            echo ""
+            echo "# --- Hugging Face Space overrides (appended by deploy-hf.yml) ---"
+            echo "# HF routes to app_port 7860 (README) and does not inject \$PORT, so pin it;"
+            echo "# keep the throwaway SQLite in a guaranteed-writable path."
+            echo "ENV PORT=7860"
+            echo "ENV DATABASE_URL=sqlite:////tmp/austin_traffic.db"
+          } >> hf/Dockerfile
           cp deploy/hf/README.md hf/README.md
           find hf -name '__pycache__' -type d -prune -exec rm -rf {} +
           find hf -name '*.pyc' -delete
@@ -69,12 +81,13 @@ jobs:
           fi
           cd hf
           git init -q -b main
-          git config user.email "actions@github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
           # HF rejects plain-git binary files; the pickled models must go via LFS.
+          # git lfs track writes .gitattributes to disk, so the single git add -A
+          # below stages it alongside the .pkl pointers.
           git lfs install --local
           git lfs track "*.pkl"
-          git add .gitattributes
           git add -A
           git commit -qm "sync backend from github@${GITHUB_SHA::7}"
           git push -f "https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_USERNAME}/${HF_SPACE}.git" main

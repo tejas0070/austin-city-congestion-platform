@@ -80,18 +80,30 @@ module.exports = {
       // silently fails to render (deck.gl overlays survive — they don't run in
       // that worker). Dev works because its browserslist targets modern browsers
       // and skips downleveling. Exclude maplibre-gl from that loader.
+      const skipMaplibre = /node_modules[\\/]maplibre-gl[\\/]/;
+      let maplibreExcluded = 0;
       oneOfRule.oneOf.forEach((rule) => {
         const usesBabel =
           typeof rule.loader === 'string' && rule.loader.includes('babel-loader');
         // The app-code babel-loader uses `include`; the node_modules one uses
         // `exclude` (for @babel/runtime). Target only the latter.
         if (usesBabel && rule.exclude && !rule.include) {
-          const skipMaplibre = /node_modules[\\/]maplibre-gl[\\/]/;
           rule.exclude = Array.isArray(rule.exclude)
             ? [...rule.exclude, skipMaplibre]
             : [rule.exclude, skipMaplibre];
+          maplibreExcluded += 1;
         }
       });
+      // Fail loud at build time (like the oneOf guard above) rather than shipping
+      // a silently-broken basemap: if CRA internals change so no loader matched,
+      // the exclude is a no-op and the production map goes blank.
+      if (maplibreExcluded === 0) {
+        throw new Error(
+          'craco.config.js: no node_modules babel-loader found to exclude maplibre-gl ' +
+            'from — CRA internals changed. Without this the production basemap silently ' +
+            'fails (maplibre worker "_slicedToArray is not defined").'
+        );
+      }
 
       return webpackConfig;
     },

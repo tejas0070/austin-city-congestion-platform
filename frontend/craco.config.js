@@ -70,6 +70,29 @@ module.exports = {
         resolve: { fullySpecified: false },
       });
 
+      // maplibre-gl ships PRE-COMPILED and must NOT be re-transpiled by Babel.
+      // Its render worker is a stringified function that runs in an isolated
+      // blob scope with no access to Babel's injected helpers. CRA's production
+      // browserslist makes the node_modules babel-loader downlevel maplibre's
+      // modern syntax (array destructuring) into `_slicedToArray(...)` calls;
+      // that helper doesn't exist inside the worker scope, so style parsing
+      // throws "ReferenceError: _slicedToArray is not defined" and the basemap
+      // silently fails to render (deck.gl overlays survive — they don't run in
+      // that worker). Dev works because its browserslist targets modern browsers
+      // and skips downleveling. Exclude maplibre-gl from that loader.
+      oneOfRule.oneOf.forEach((rule) => {
+        const usesBabel =
+          typeof rule.loader === 'string' && rule.loader.includes('babel-loader');
+        // The app-code babel-loader uses `include`; the node_modules one uses
+        // `exclude` (for @babel/runtime). Target only the latter.
+        if (usesBabel && rule.exclude && !rule.include) {
+          const skipMaplibre = /node_modules[\\/]maplibre-gl[\\/]/;
+          rule.exclude = Array.isArray(rule.exclude)
+            ? [...rule.exclude, skipMaplibre]
+            : [rule.exclude, skipMaplibre];
+        }
+      });
+
       return webpackConfig;
     },
   },

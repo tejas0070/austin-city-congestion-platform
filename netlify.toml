@@ -10,11 +10,11 @@
   # CRA needs the build to succeed even with lint warnings.
   CI = "false"
   NODE_VERSION = "20"
-  # ── REQUIRED: point the frontend at your deployed backend ──────────────────
-  # Replace with your Render URL after the API deploys, e.g.
-  #   https://austin-traffic-api.onrender.com
-  # (You can also set REACT_APP_API_BASE_URL in the Netlify UI instead.)
-  REACT_APP_API_BASE_URL = "https://austin-traffic-api.onrender.com"
+  # ── Backend API base URL ───────────────────────────────────────────────────
+  # Backend runs on a Hugging Face Docker Space (2 vCPU) so the ML forecast
+  # endpoints work; Render's free 0.1 vCPU 502'd on them.
+  # (You can also override REACT_APP_API_BASE_URL in the Netlify UI.)
+  REACT_APP_API_BASE_URL = "https://vtejas00-austin-traffic-api.hf.space"
 
 # Single-page app: serve index.html for any client-side route.
 [[redirects]]

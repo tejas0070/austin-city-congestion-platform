@@ -13,6 +13,7 @@ from ...services.ml_model import (
     get_model_meta,
     model_is_available,
 )
+from ...utils.clock import austin_today
 from ...utils.geojson_builder import build_feature_collection
 
 router = APIRouter(prefix="/api/traffic", tags=["traffic"])
@@ -63,7 +64,7 @@ async def get_corridors_day(
     except ValueError:
         raise HTTPException(status_code=400, detail="date must be formatted YYYY-MM-DD")
 
-    days_ahead = (target - datetime.now().date()).days
+    days_ahead = (target - austin_today()).days
     if days_ahead < 0 or days_ahead > _MAX_PREVIEW_DAYS:
         raise HTTPException(
             status_code=400,
@@ -87,7 +88,7 @@ async def get_corridors_week(
     except ValueError:
         raise HTTPException(status_code=400, detail="start must be formatted YYYY-MM-DD")
 
-    days_ahead = (start_date - datetime.now().date()).days
+    days_ahead = (start_date - austin_today()).days
     # The week containing "today" starts on Monday, which may be up to 6 days in
     # the past, so allow a start that far back; the model still produces an
     # expectation for elapsed days. The window spans start..start+6, so the last

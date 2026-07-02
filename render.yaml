@@ -13,6 +13,11 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.4"
+      # Render's free tier runs in UTC. The prediction paths are already pinned to
+      # Austin time in code (backend/utils/clock.py), but set the process TZ too so
+      # any other bare datetime.now() (logs, cache timestamps) is Central as well.
+      - key: TZ
+        value: "America/Chicago"
       # Comma-separated extra browser origins allowed by CORS. Your Netlify site
       # (*.netlify.app) already works without this; set it only for a custom domain.
       - key: ALLOWED_ORIGINS

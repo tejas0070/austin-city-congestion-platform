@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date
 from pathlib import Path
+
+from ..utils.clock import austin_today
 
 USAGE_PATH = Path(__file__).resolve().parents[2] / "data" / "models" / "tomtom_usage.json"
 
@@ -30,7 +31,9 @@ def _load() -> dict:
 
 
 def _today() -> str:
-    return date.today().isoformat()
+    # Austin-local calendar day so the free-tier quota rolls at Austin midnight,
+    # not the host's UTC midnight (which is ~6-7 PM Central on a UTC host like HF).
+    return austin_today().isoformat()
 
 
 def used_today() -> int:

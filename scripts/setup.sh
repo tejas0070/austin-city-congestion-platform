@@ -26,10 +26,11 @@ error()   { echo -e "${RED}[setup]${NC} $*" >&2; exit 1; }
 if [[ ! -f .env ]]; then
   if [[ -f .env.example ]]; then
     cp .env.example .env
-    warn ".env created from .env.example — fill in your API keys before continuing."
-    warn "  Required: TOMTOM_API_KEY, OPENWEATHER_API_KEY, TICKETMASTER_API_KEY"
+    warn ".env created from .env.example. All keys are OPTIONAL — the app runs on"
+    warn "SQLite + committed model artifacts and silent fallbacks without any of them."
+    warn "  Optional (free tiers): TOMTOM_API_KEY, TICKETMASTER_API_KEY, SOCRATA_APP_TOKEN"
     echo
-    read -rp "Press Enter once you have added your API keys to .env, or Ctrl-C to cancel…"
+    read -rp "Press Enter to continue (add optional keys to .env now or any time later)…"
   else
     error ".env not found and no .env.example to copy from. Create .env manually."
   fi

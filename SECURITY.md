@@ -13,24 +13,25 @@ vulnerabilities not applicable — see the table.
 ## Audit results
 
 | # | Item | Status | Notes |
-|---|------|--------|-------|
+| --- | --- | --- | --- |
 | 1 | Database without Row Level Security | ✅ N/A | No per-user/tenant data. Every row is public reference data; there is nothing to isolate between users. |
 | 2 | Unprotected API routes (no auth) | ✅ By design | Endpoints are intentionally public and read-only (`GET` only). The real risk — abuse — is handled by rate limiting (#10). |
-| 3 | Committed secrets (`.env` on GitHub) | ✅ Safe in git | `.env` is in `.gitignore` and **was never committed** (`git log --all -- .env` is empty; only `.env.example` is tracked). **Action required:** the real keys still need rotation — see below. |
+| 3 | Committed secrets (`.env` on GitHub) | ✅ Safe | `.env` and `.env.*` are in `.gitignore` and **were never committed** (`git log --all -- .env` is empty; only `.env.example` is tracked). All secrets are supplied at runtime via host environment variables. |
 | 4 | Broken access control (IDOR) | ✅ N/A | No object ownership and no IDs that reference per-user data. |
-| 5 | Secret keys in frontend code | ✅ OK | Frontend holds only `REACT_APP_MAPBOX_TOKEN` (a *publishable* token, designed for client use) and the API base URL. No backend secrets reach the browser. Restrict the Mapbox token by URL in the Mapbox dashboard. |
-| 6 | Server-Side Request Forgery (SSRF) | ✅ Not vulnerable | All outbound calls (Open-Meteo, TxDOT, Ticketmaster) use **hardcoded hosts**; no user input controls a URL host or path. |
+| 5 | Secret keys in frontend code | ✅ OK | The map uses **MapLibre GL + Carto** basemaps, which need **no token**. The only build-time frontend variable is `REACT_APP_API_BASE_URL` (the public API URL). No backend secrets reach the browser. |
+| 6 | Server-Side Request Forgery (SSRF) | ✅ Not vulnerable | All outbound calls (Open-Meteo, TomTom, Ticketmaster, Socrata) use **hardcoded hosts**; no user input controls a URL host or path. |
 | 7 | Missing CSRF protection | ✅ N/A | No cookies/sessions, no state-changing endpoints, `allow_credentials=False`. CSRF requires ambient credentials, which don't exist here. |
-| 8 | Missing security headers | 🔧 **Fixed** | Added `SecurityHeadersMiddleware` (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, HSTS, COOP, CORP). |
-| 9 | Wildcard CORS | ✅ Already correct | CORS is restricted to `localhost:3000/3001` + a `*.netlify.app` regex, `GET` only, no credentials. Not a wildcard. |
-| 10 | No rate limiting | 🔧 **Fixed** | Added `RateLimitMiddleware` — per-IP fixed-window limiter (default 120 req/60s). |
-| 11 | SQL injection | ✅ Not vulnerable | Web queries use the SQLAlchemy ORM (parameterized). The only raw SQL is in the admin-only `scripts/init_db.py`, on config-derived identifiers, never user input. |
+| 8 | Missing security headers | 🔧 **Fixed** | `SecurityHeadersMiddleware` adds CSP (`default-src 'none'`), `X-Frame-Options: DENY`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, HSTS, COOP, and CORP to every response. |
+| 9 | Wildcard CORS | ✅ Restricted | CORS allows `localhost:3000/3001` plus a regex for `*.netlify.app`, `*.vercel.app`, and `*.pages.dev`, `GET` only, no credentials. Extra origins (custom domains) are opt-in via `ALLOWED_ORIGINS`. Not a wildcard. |
+| 10 | No rate limiting | 🔧 **Fixed** | `RateLimitMiddleware` — per-IP fixed-window limiter (default 120 req/60s), with a `TRUST_PROXY` guard so `X-Forwarded-For` is only honored behind a known proxy. |
+| 11 | SQL injection | ✅ Not vulnerable | All DB access uses the SQLAlchemy ORM (parameterized). There is no raw SQL built from user input. |
 | 12 | Cross-site scripting (XSS) | ✅ Not vulnerable | API returns JSON only; React escapes by default and there is no `dangerouslySetInnerHTML`/`innerHTML`. CSP (#8) adds defense-in-depth. |
 | 13 | Unverified Stripe webhooks | ✅ N/A | No Stripe / no payments. |
 | 14 | Insecure file uploads | ✅ N/A | No upload endpoints. |
-| 15 | Verbose error messages | 🔧 **Fixed** | Added a global exception handler that logs detail server-side and returns a generic `500` to clients. Services already fail silently with safe fallbacks. |
+| 15 | Verbose error messages | 🔧 **Fixed** | A global exception handler logs detail server-side and returns a generic `500` to clients. Route input errors return a clean `400`. Services fail silently with safe fallbacks. |
 | 16 | Weak password hashing | ✅ N/A | No passwords / no auth. |
-| 17 | Hallucinated packages (slopsquatting) | ✅ Verified | All `requirements.txt` and `package.json` dependencies are real, well-known, pinned packages. |
+| 17 | Unbounded query parameters | ✅ Validated | Every query param is bounded (`Query(..., ge=…, le=…)`) and dates are parsed with a strict `YYYY-MM-DD` format that returns `400` on bad input. |
+| 18 | Hallucinated packages (slopsquatting) | ✅ Verified | All `requirements.txt` and `package.json` dependencies are real, well-known, pinned packages. |
 
 ## Changes made (code)
 
@@ -46,27 +47,27 @@ No new third-party dependencies were added; the limiter and headers use the
 existing Starlette stack, matching the project's in-memory `utils/cache.py`
 approach.
 
+## Secret management
+
+- **Nothing secret is committed.** `.env`/`.env.*` are git-ignored; only
+  `.env.example` (placeholder values) is tracked. Confirm with
+  `git log --all -- .env` (empty) and `git status` (never lists `.env`).
+- **All secrets are runtime-only**, injected as host environment variables:
+  Netlify (frontend build var `REACT_APP_API_BASE_URL`) and the Hugging Face
+  Space / Render (`TOMTOM_API_KEY`, `TICKETMASTER_API_KEY`, `SOCRATA_APP_TOKEN`,
+  and optionally `DATABASE_URL`). Every one is **optional** — without them the app
+  runs on SQLite + committed model artifacts and silent fallbacks.
+- **If a key is ever exposed, rotate it** at its provider and update the host
+  environment variable. Never paste real keys into source, docs, or commit
+  messages.
+
 ### Deployment notes
 
-- **Behind a proxy (Render/Railway/Netlify):** set `TRUST_PROXY=true` so the
-  limiter keys on the real client IP from `X-Forwarded-For` instead of the proxy
-  IP. Leave it `false` for local/direct runs (so the header can't be spoofed).
+- **Behind a proxy (Hugging Face Space / Render / Netlify):** set
+  `TRUST_PROXY=true` so the limiter keys on the real client IP from
+  `X-Forwarded-For` instead of the proxy IP. Leave it `false` for local/direct
+  runs (so the header can't be spoofed).
 - **Multi-worker / multi-instance:** the limiter and cache are per-process. For a
   shared limit across workers, back them with Redis. For a single free-tier
   instance, the in-memory limiter is sufficient.
-
-## ⚠️ Action required: rotate exposed API keys
-
-The committed history is clean, but the live `.env` contains **real** keys that
-should be treated as compromised and rotated (they were present in the working
-tree and may have been shared/exposed):
-
-| Key | Where to rotate | In use by code? |
-|-----|-----------------|-----------------|
-| `TICKETMASTER_API_KEY` | https://developer.ticketmaster.com (regenerate) | Yes — events |
-| `DB_PASSWORD` (`Texas123`) | Rotate the Postgres role password | Yes — DB / docker-compose |
-| `TOMTOM_API_KEY` | https://developer.tomtom.com | Yes — offline collector `scripts/collect_tomtom_observations.py` (not the live serving path). Rotate; keep it if you still collect training data, otherwise delete. |
-| `OPENWEATHER_API_KEY` | https://openweathermap.org/api | **No** — no code reads it (weather uses keyless Open-Meteo); delete from `.env`. |
-
-After rotating, also set a strong DB password (avoid `Texas123`-style values)
-and confirm `.env` is never staged (`git status` should not list it).
+</content>

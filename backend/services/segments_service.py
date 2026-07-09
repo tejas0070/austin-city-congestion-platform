@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..utils.cache import get_cache, set_cache
+from ..utils.clock import austin_now
 from ..utils.geojson_builder import build_feature_collection, build_line_feature
 from .congestion_features import (
     base_pattern,
@@ -108,7 +109,11 @@ def build_live_segments() -> dict:
     if cached:
         return cached
 
-    now = datetime.now()
+    # Austin wall-clock (not the server's TZ): the live snapshot's hour-of-day
+    # drives the congestion base pattern AND the "as of <time>" caption the UI
+    # shows. On UTC hosts (Render) a bare datetime.now() would compute the wrong
+    # hour and display a +5/6h time — mirror ml_model.py and pin to Austin.
+    now = austin_now()
     rng = random.Random(int(now.timestamp()) // LIVE_CACHE_TTL)  # stable within a cache window
     features: list[dict] = []
     for seg in load_display_segments():

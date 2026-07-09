@@ -5,8 +5,7 @@ city-wide **machine-learning congestion forecast** with a calibrated confidence
 signal. The model **retrains itself every 6 hours** from real Austin sensor data
 and hot-reloads with no downtime.
 
-**Live API:** <https://vtejas00-austin-traffic-api.hf.space/health> — the React +
-kepler.gl frontend is deployed free on Netlify.
+**Live demo:** <https://subtle-sprite-d869b3.netlify.app> &nbsp;·&nbsp; **API:** <https://vtejas00-austin-traffic-api.hf.space/health>
 
 > Runs on a $0 stack — SQLite + committed model artifacts, free-tier hosting, and
 > a GitHub Actions retrain loop that stays inside every free API budget.

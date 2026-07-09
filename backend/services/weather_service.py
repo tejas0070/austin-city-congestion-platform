@@ -1,7 +1,8 @@
-from datetime import date, datetime
+from datetime import date
 
 import httpx
 from ..utils.cache import get_cache, set_cache
+from ..utils.clock import austin_today
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 AUSTIN_LAT = 30.2672
@@ -80,7 +81,11 @@ async def fetch_hourly_forecast(target_date: date) -> dict | None:
     Cached 15 min. Returns ``None`` silently on error or out-of-horizon so callers can
     fall back to the current-weather proxy.
     """
-    days_ahead = (target_date - datetime.now().date()).days
+    # Austin-local "today": target_date is an Austin calendar date, so the offset
+    # must be measured from Austin's today. On a UTC host a bare datetime.now().date()
+    # is already tomorrow during Austin evenings, pushing days_ahead to -1 and
+    # dropping the current day's hourly forecast.
+    days_ahead = (target_date - austin_today()).days
     if days_ahead < 0 or days_ahead > FORECAST_HORIZON_DAYS:
         return None
 

@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timedelta, timezone
 import httpx
 from ..utils.cache import get_cache, set_cache
+from ..utils.clock import austin_today
 from ..utils.geojson_builder import build_point_feature, build_feature_collection
 
 _UTC = timezone.utc
@@ -60,7 +61,7 @@ async def build_events_geojson(days: int = 30) -> dict:
     days_until (for time-based filtering in the UI).
     """
     events = await fetch_upcoming_events(days=days)
-    now = datetime.now(_UTC)
+    today = austin_today()
 
     features: list[dict] = []
     for ev in events:
@@ -71,8 +72,10 @@ async def build_events_geojson(days: int = 30) -> dict:
         attendance = ev.get("expected_attendance") or _DEFAULT_ATTENDANCE
         days_until = None
         try:
-            event_date = datetime.strptime(ev["date"], "%Y-%m-%d").replace(tzinfo=_UTC)
-            days_until = (event_date - now).days
+            # Both sides are Austin-local calendar dates, so "days until" can't drift
+            # by one when the host's UTC clock has already rolled past midnight.
+            event_date = datetime.strptime(ev["date"], "%Y-%m-%d").date()
+            days_until = (event_date - today).days
         except Exception:
             pass
 
@@ -97,9 +100,11 @@ def _get_hardcoded_events(
     attendance: int,
     days: int,
 ) -> list[dict]:
-    now = datetime.now(_UTC)
-    today = now.strftime("%Y-%m-%d")
-    cutoff = (now + timedelta(days=days)).strftime("%Y-%m-%d")
+    # Austin-local window so a same-day event isn't filtered out ~5h early once the
+    # host's UTC clock rolls to "tomorrow" during the Austin evening.
+    today_d = austin_today()
+    today = today_d.isoformat()
+    cutoff = (today_d + timedelta(days=days)).isoformat()
     venue = VENUE_COORDS[source]
     return [
         {

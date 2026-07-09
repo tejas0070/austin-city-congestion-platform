@@ -1,12 +1,12 @@
 # Austin Traffic Intelligence Platform
 
-React 18 + kepler.gl frontend with a FastAPI backend. Visualizes real-time Austin traffic, events, and weather on an interactive Mapbox map.
+React 18 + kepler.gl frontend with a FastAPI backend. Visualizes real-time Austin traffic, events, and weather on an interactive MapLibre map.
 
 ## Stack
 
-- **Frontend:** React 18, Redux, @kepler.gl/components v3, Mapbox GL JS, Tailwind CSS, Axios
-- **Backend:** FastAPI, SQLAlchemy 2.0, PostgreSQL, Alembic, httpx
-- **Data:** TxDOT (traffic + incidents), Open-Meteo (weather, free, no key), Ticketmaster (events), Austin 311 (construction)
+- **Frontend:** React 18, Redux, @kepler.gl/components v3, MapLibre GL JS + Carto (no token), Tailwind CSS, Axios
+- **Backend:** FastAPI, SQLAlchemy 2.0, SQLite by default (Postgres optional), Alembic, httpx
+- **Data:** City of Austin / Socrata (Bluetooth + radar), TomTom (real-time flow), Open-Meteo (weather, free, no key), Ticketmaster (events), OSM Overpass (road network)
 - **Build:** CRACO (CRA 5 + webpack polyfills for kepler.gl)
 
 ## Project Structure
@@ -38,18 +38,18 @@ alembic/               DB migrations
 
 ## Environment Variables
 
-**Backend (.env at project root):**
+**Backend (.env at project root) — all optional; the app runs on SQLite + committed artifacts without any of them:**
 
 ```text
-DATABASE_URL=postgresql://user:password@localhost:5432/austin_traffic
-TICKETMASTER_API_KEY=
-SOCRATA_APP_TOKEN=
+DATABASE_URL=            # optional; defaults to SQLite (sqlite:///./dev.db)
+TOMTOM_API_KEY=          # optional; real-time flow + self-update collection
+TICKETMASTER_API_KEY=    # optional; events (free tier)
+SOCRATA_APP_TOKEN=       # optional; raises Austin open-data rate limit
 ```
 
 **Frontend (frontend/.env):**
 
 ```text
-REACT_APP_MAPBOX_TOKEN=your_mapbox_token_here
 REACT_APP_API_BASE_URL=http://localhost:8000
 ```
 
@@ -293,9 +293,9 @@ frontend:
 
 ## Deployment
 
-- **Frontend:** Netlify — `cd frontend && npm run build`, deploy `build/`
-- **Backend:** Render or Railway — `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
-- **Database:** Supabase free tier (set `DATABASE_URL` in environment)
+- **Frontend:** Netlify — base `frontend/`, `npm run build`, publish `build/` (config in `netlify.toml`)
+- **Backend:** Hugging Face Docker Space — auto-deployed from `main` via `.github/workflows/deploy-hf.yml`; a `render.yaml` blueprint for Render/Railway is also included
+- **Database:** none required — SQLite + committed artifacts; set `DATABASE_URL` only to use Postgres
 
 ## Conventions
 

@@ -18,10 +18,10 @@ only** (the 24-hour day-prediction surface is out of scope for this cut).
 
 ## Goals
 
-- Train on real, free, Austin-specific data (resume-worthy).
+- Train on real, free, Austin-specific data.
 - Attach calibrated per-segment confidence to predictions.
 - Add **zero** latency to the live request path — all heavy work stays offline.
-- Produce defensible metrics (MAE, R², empirical interval coverage) as a portfolio artifact.
+- Produce defensible metrics (MAE, R², empirical interval coverage).
 
 ## Non-Goals
 
@@ -82,7 +82,7 @@ New script `scripts/build_real_training_data.py`, run manually:
     (the calibration metric; target ≈ 0.80).
   - **Width-calibration anchors** — 5th and 95th percentile interval widths, for the
     width→confidence mapping.
-- Generate `docs/model_card.md`: dataset size, date range, features, MAE/R²/coverage — portfolio artifact.
+- Generate `docs/model_card.md`: dataset size, date range, features, MAE/R²/coverage.
 
 ## Width → confidence mapping
 

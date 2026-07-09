@@ -1,53 +1,74 @@
-# Deploying for free (Render + Netlify)
+# Deploying for free (Hugging Face Space + Netlify)
 
 The app runs on **SQLite + committed ML artifacts**, so there is **no database to
 provision**. Total cost: $0.
 
-## 1. Push the current work
+- **Backend (FastAPI + ML):** a Hugging Face **Docker Space** (2 vCPU / 16 GB free
+  tier). HF's free tier runs the ML forecast endpoints that Render's 0.1 vCPU
+  502'd on.
+- **Frontend (React + kepler.gl):** **Netlify**.
 
-The deployable code lives on a feature branch with uncommitted changes. Commit and
-push (or merge to `main`) so the hosts can build it:
+## 1. Push to `main`
+
+Both hosts build from `main`. Commit and push your work:
 
 ```bash
 git add -A
-git commit -m "chore: add Render + Netlify deploy configs"
-git push origin feat/prediction-confidence   # or merge to main first
+git commit -m "chore: deploy"
+git push origin main
 ```
 
-## 2. Backend → Render (free)
+## 2. Backend → Hugging Face Space (free)
 
-1. Go to <https://render.com> → sign in with GitHub.
-2. **New +** → **Blueprint** → pick `austin-city-congestion-platform`.
-3. Render reads [`render.yaml`](render.yaml) and creates the `austin-traffic-api`
-   web service automatically. Click **Apply**.
-4. Wait for the first build (~3–5 min). Note the URL, e.g.
-   `https://austin-traffic-api.onrender.com`. Confirm `…/health` returns
+Deployment is automated by [`.github/workflows/deploy-hf.yml`](.github/workflows/deploy-hf.yml):
+every push to `main` that touches `backend/`, `data/models/`, `data/geo/`, or the
+Dockerfile mirrors a runtime-only subset of the repo to the Space, which rebuilds
+automatically.
+
+One-time setup:
+
+1. On Hugging Face: **New Space** → SDK **Docker** → create an empty Space.
+2. In this repo → **Settings → Secrets and variables → Actions**:
+   - secret `HF_TOKEN` = a Hugging Face access token with **write** role
+   - variable `HF_USERNAME` = your HF username/org
+   - variable `HF_SPACE` = the Space name
+3. Push to `main` (or run the workflow from the **Actions** tab). The API lands at
+   `https://<username>-<space>.hf.space`. Confirm `…/health` returns
    `{"status":"ok"}`.
 
-Optional: add free-tier keys (`TOMTOM_API_KEY`, `TICKETMASTER_API_KEY`) in the
-service's **Environment** tab for live flow + events. Without them the app uses
-silent fallbacks.
+Optional: add free-tier keys (`TOMTOM_API_KEY`, `TICKETMASTER_API_KEY`,
+`SOCRATA_APP_TOKEN`) in the Space's **Settings → Variables and secrets** for live
+flow + events. Without them the app uses silent fallbacks.
 
-> **Free-tier note:** the service sleeps after ~15 min idle, so the *first* visit
-> after a nap takes ~50s to wake. Fine for a demo/portfolio. To avoid it, upgrade
-> the Render plan or use an uptime pinger against `/health`.
+> **Free-tier note:** the Space sleeps after idle, so the *first* visit after a nap
+> takes a moment to wake. Fine for a demo. Use an uptime pinger against `/health`
+> to keep it warm.
 
 ## 3. Frontend → Netlify (free)
 
-1. Edit [`netlify.toml`](netlify.toml): set `REACT_APP_API_BASE_URL` to your Render
-   URL from step 2 (or set it in the Netlify UI under Site → Environment).
+1. Edit [`netlify.toml`](netlify.toml): set `REACT_APP_API_BASE_URL` to your HF
+   Space URL from step 2 (or set it in the Netlify UI under Site → Environment).
 2. Go to <https://netlify.com> → **Add new site** → **Import from Git** → pick the
    repo. Netlify reads `netlify.toml` (base `frontend/`, publish `build/`).
 3. Deploy. Your site lands at `https://<name>.netlify.app` — already allowed by the
-   backend's CORS.
+   backend's CORS (`*.netlify.app`), so no extra config is needed.
 
 ## 4. Verify
 
 Open the Netlify URL. The kepler.gl map should paint green→red corridors within a
 few seconds. If it shows the "add data" empty state, the backend URL is wrong or the
-API is still waking up (reload after ~1 min).
+Space is still waking up (reload after a moment).
 
 ## Custom domain (optional)
 
-Point CORS at a custom frontend domain by setting `ALLOWED_ORIGINS` on the Render
-service (comma-separated), e.g. `https://traffic.example.com`.
+For a custom frontend domain, set `ALLOWED_ORIGINS` (comma-separated) on the HF
+Space, e.g. `https://traffic.example.com`.
+
+## Self-updating model
+
+[`.github/workflows/retrain.yml`](.github/workflows/retrain.yml) runs every 6 hours:
+it collects a budget-bounded sample of real TomTom congestion, retrains, and — only
+if the regression gate approves the new model — commits the improved artifacts back
+to `main`. That push re-triggers the HF deploy so the API serves the fresh model.
+Add the repo secret `TOMTOM_API_KEY` to enable it.
+</content>

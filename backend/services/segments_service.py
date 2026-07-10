@@ -111,7 +111,7 @@ def build_live_segments() -> dict:
 
     # Austin wall-clock (not the server's TZ): the live snapshot's hour-of-day
     # drives the congestion base pattern AND the "as of <time>" caption the UI
-    # shows. On UTC hosts (Render) a bare datetime.now() would compute the wrong
+    # shows. On UTC hosts (e.g. HF Spaces) a bare datetime.now() would compute the wrong
     # hour and display a +5/6h time — mirror ml_model.py and pin to Austin.
     now = austin_now()
     rng = random.Random(int(now.timestamp()) // LIVE_CACHE_TTL)  # stable within a cache window

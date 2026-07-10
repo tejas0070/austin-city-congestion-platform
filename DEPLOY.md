@@ -4,8 +4,7 @@ The app runs on **SQLite + committed ML artifacts**, so there is **no database t
 provision**. Total cost: $0.
 
 - **Backend (FastAPI + ML):** a Hugging Face **Docker Space** (2 vCPU / 16 GB free
-  tier). HF's free tier runs the ML forecast endpoints that Render's 0.1 vCPU
-  502'd on.
+  tier), which comfortably runs the ML forecast endpoints.
 - **Frontend (React + kepler.gl):** **Netlify**.
 
 ## 1. Push to `main`

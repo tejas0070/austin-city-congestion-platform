@@ -9,7 +9,7 @@ from starlette.responses import Response
 _CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
 
 # Static headers added to every response. HSTS is only honored over HTTPS, so it
-# is harmless on local HTTP and active once deployed behind TLS (Render/Netlify).
+# is harmless on local HTTP and active once deployed behind TLS (HF Space/Netlify).
 _SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",

@@ -3,7 +3,7 @@ name: Retrain congestion model
 # Self-updating model, free: every 6 hours collect a budget-bounded sample of
 # real TomTom congestion, retrain, and — only if the regression gate approves the
 # new model — commit the improved artifacts back to main. Pushing to main triggers
-# Render to redeploy with the fresh model automatically.
+# the Hugging Face Space to redeploy with the fresh model automatically.
 #
 # Requires repo secret TOMTOM_API_KEY (Settings -> Secrets and variables -> Actions).
 # SOCRATA_APP_TOKEN and TICKETMASTER_API_KEY are optional.

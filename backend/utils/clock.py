@@ -2,8 +2,8 @@
 
 The app serves naive, Austin-local ISO timestamps and the frontend parses them
 as local wall-clock, so the prediction paths must reason in Austin time
-regardless of the server's own timezone. Render's free tier runs in UTC, so a
-bare ``datetime.now()`` there computes the wrong hour-of-day and shifts every
+regardless of the server's own timezone. Cloud hosts (incl. HF Spaces) run in
+UTC, so a bare ``datetime.now()`` there computes the wrong hour-of-day and shifts every
 "+Nh" forecast (and can flip "today" across the UTC/Central date boundary). These
 helpers pin the reference to America/Chicago and return it *naive* so the existing
 ISO contract — Austin wall-clock shown to every viewer — is unchanged.

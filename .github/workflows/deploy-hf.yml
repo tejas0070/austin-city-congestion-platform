@@ -1,9 +1,9 @@
 name: Deploy backend to Hugging Face Space
 
 # Mirrors a RUNTIME-ONLY subset of the repo to a Hugging Face Docker Space, which
-# rebuilds on each push. HF's 2 vCPU / 16 GB free tier runs the ML forecast
-# endpoints that Render's 0.1 vCPU could not. Training CSVs are excluded, so all
-# pushed files stay < 10 MB and HF never demands git-LFS.
+# rebuilds on each push. HF's 2 vCPU / 16 GB free tier comfortably runs the ML
+# forecast endpoints. Training CSVs are excluded, so all pushed files stay < 10 MB
+# and HF never demands git-LFS.
 #
 # One-time setup (see DEPLOY.md):
 #   1. Create an empty HF Space: New Space -> SDK "Docker".

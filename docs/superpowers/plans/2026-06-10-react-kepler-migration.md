@@ -2364,7 +2364,7 @@ REACT_APP_API_BASE_URL=http://localhost:8000
 ## Deployment
 
 - **Frontend:** Netlify — `cd frontend && npm run build`, deploy `build/`
-- **Backend:** Render or Railway — `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
+- **Backend:** Hugging Face Docker Space — `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
 - **Database:** Supabase free tier (set `DATABASE_URL` in environment)
 
 ## Conventions

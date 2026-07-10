@@ -12,7 +12,7 @@
   NODE_VERSION = "20"
   # ── Backend API base URL ───────────────────────────────────────────────────
   # Backend runs on a Hugging Face Docker Space (2 vCPU) so the ML forecast
-  # endpoints work; Render's free 0.1 vCPU 502'd on them.
+  # endpoints work.
   # (You can also override REACT_APP_API_BASE_URL in the Netlify UI.)
   REACT_APP_API_BASE_URL = "https://vtejas00-austin-traffic-api.hf.space"
 

@@ -294,7 +294,7 @@ frontend:
 ## Deployment
 
 - **Frontend:** Netlify — base `frontend/`, `npm run build`, publish `build/` (config in `netlify.toml`)
-- **Backend:** Hugging Face Docker Space — auto-deployed from `main` via `.github/workflows/deploy-hf.yml`; a `render.yaml` blueprint for Render/Railway is also included
+- **Backend:** Hugging Face Docker Space — auto-deployed from `main` via `.github/workflows/deploy-hf.yml`
 - **Database:** none required — SQLite + committed artifacts; set `DATABASE_URL` only to use Postgres
 
 ## Conventions

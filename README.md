@@ -180,9 +180,7 @@ Free-tier, $0 total — see [DEPLOY.md](DEPLOY.md) for the step-by-step guide.
   API Space URL. `*.netlify.app` is already allowed by the backend's CORS.
 - **Backend → Hugging Face Space:** a Docker Space (2 vCPU) auto-deployed from
   `main` by [`.github/workflows/deploy-hf.yml`](.github/workflows/deploy-hf.yml).
-  HF's free tier runs the ML forecast endpoints that Render's 0.1 vCPU could not; a
-  [`render.yaml`](render.yaml) blueprint for running the API on Render instead is
-  also included.
+  HF's free tier comfortably runs the ML forecast endpoints.
 - **Database:** none required — SQLite + committed artifacts. Set `DATABASE_URL`
   only to point at Postgres.
 

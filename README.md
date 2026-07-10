@@ -95,6 +95,27 @@ sure it is.
 
 Full ML details are in [CLAUDE.md](CLAUDE.md) and [docs/model_card.md](docs/model_card.md).
 
+## Results
+
+Forecasts the **typical congestion for each corridor by hour-of-week**, evaluated
+on a **leak-free** hold-out set of 907 corridor-hours (real Austin sensor data,
+~382K readings). Full write-up: **[docs/RESULTS.md](docs/RESULTS.md)**.
+
+| Metric | Result |
+| ------ | ------ |
+| Typical-congestion **R²** | **0.74** |
+| **MAE** (0–100 scale) | **2.7** |
+| Traffic-tier (green/yellow/red) accuracy | **85%** |
+| Within ±10 points | **95%** |
+| 80% prediction intervals → empirical coverage | **~80%** (calibrated) |
+
+**What makes it trustworthy:** evaluation is leak-free (`seasonal_level` rebuilt
+per fold, so held-out targets never leak), a **regression gate** blocks any retrain
+that gets worse, and confidence is a **conformal-calibrated** interval capped by how
+much real history backs each road. Individual 15-min readings are ~70% irreducible
+noise (R² 0.26) — so the system forecasts, and reports on, the level where the
+signal is genuinely strong. Reproduce with `python scripts/evaluate_model.py`.
+
 ## Real training data
 
 The model trains on real City of Austin + TomTom data (no synthetic shaping).

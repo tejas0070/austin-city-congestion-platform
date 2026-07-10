@@ -60,3 +60,7 @@ alembic/versions/__pycache__/
 
 # TomTom runtime budget counter (daily state, not an artifact)
 data/models/tomtom_usage.json
+
+# Internal security audit — kept local, not published to the public repo
+/SECURITY.md
+.playwright-mcp/

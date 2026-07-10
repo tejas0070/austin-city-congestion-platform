@@ -29,7 +29,7 @@
     "crypto-browserify": "^3.12.0",
     "os-browserify": "^0.3.0",
     "path-browserify": "^1.0.1",
-    "postcss": "^8.4.0",
+    "postcss": "^8.4.31",
     "react-scripts": "5.0.1",
     "stream-browserify": "^3.0.0",
     "tailwindcss": "^3.4.0",
@@ -42,7 +42,12 @@
     "test": "craco test --watchAll=false"
   },
   "overrides": {
-    "typescript": "^4.9.5"
+    "typescript": "^4.9.5",
+    "nth-check": "^2.1.1",
+    "node-fetch": "^2.7.0",
+    "form-data": "^4.0.6",
+    "d3-color": "^3.1.0",
+    "http-proxy-middleware": "^2.0.10"
   },
   "browserslist": {
     "production": [

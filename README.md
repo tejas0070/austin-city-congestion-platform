@@ -7,6 +7,10 @@ and hot-reloads with no downtime.
 
 **Live demo:** <https://subtle-sprite-d869b3.netlify.app> &nbsp;·&nbsp; **API:** <https://vtejas00-austin-traffic-api.hf.space/health>
 
+[![Austin Traffic Intelligence — live congestion map of Austin, TX, with color-coded corridors and event venues on a dark kepler.gl map](docs/map-screenshot.png)](https://subtle-sprite-d869b3.netlify.app)
+
+*Live congestion across Austin's highway network (green → red), with event venues and incidents overlaid — rendered on kepler.gl + MapLibre. Click to open the live demo.*
+
 > Runs on a $0 stack — SQLite + committed model artifacts, free-tier hosting, and
 > a GitHub Actions retrain loop that stays inside every free API budget.
 

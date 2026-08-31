@@ -23,44 +23,44 @@
   ],
   "target": "congestion_pct",
   "model_type": "HistGradientBoostingRegressor",
-  "test_mae": 8.234,
-  "test_r2": 0.3145,
-  "point_holdout_r2": 0.3145,
-  "point_holdout_mae": 8.234,
+  "test_mae": 8.107,
+  "test_r2": 0.3323,
+  "point_holdout_r2": 0.3323,
+  "point_holdout_mae": 8.107,
   "leakfree_eval": true,
-  "training_rows": 475779,
+  "training_rows": 476179,
   "interval": {
     "lower_quantile": 0.1,
     "upper_quantile": 0.9,
     "nominal_coverage": 0.8
   },
-  "empirical_coverage": 0.8975,
+  "empirical_coverage": 0.8984,
   "confidence_interval": {
     "lower_quantile": 0.25,
     "upper_quantile": 0.75
   },
   "conformal_q": 0.0,
-  "confidence_interval_coverage_raw": 0.7697,
-  "confidence_interval_coverage": 0.7697,
+  "confidence_interval_coverage_raw": 0.7699,
+  "confidence_interval_coverage": 0.7699,
   "expected_value_interval": {
-    "ev_q_80": 4.781,
-    "ev_q_50": 1.157,
-    "coverage_80": 0.808,
-    "coverage_50": 0.4531,
-    "buckets": 1301,
-    "ev_ref_width": 15.614,
+    "ev_q_80": 4.141,
+    "ev_q_50": 1.19,
+    "coverage_80": 0.804,
+    "coverage_50": 0.4868,
+    "buckets": 1285,
+    "ev_ref_width": 15.801,
     "note": "pred +/- ev_q (modulated per-corridor) covers the typical value"
   },
   "width_anchors": {
     "p5": 0.0,
-    "p95": 39.444
+    "p95": 40.61
   },
   "confidence_anchors": {
     "full": 8.0,
     "zero": 45.0
   },
-  "confidence_mean": 75.0,
-  "confidence_pct_high": 57.6,
-  "confidence_mean_per_reading_legacy": 76.1,
+  "confidence_mean": 80.0,
+  "confidence_pct_high": 64.6,
+  "confidence_mean_per_reading_legacy": 75.7,
   "data_source": "City of Austin Bluetooth travel sensors (real)"
 }
